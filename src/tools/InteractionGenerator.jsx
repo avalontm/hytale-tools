@@ -2,6 +2,127 @@ import React, { useState, useEffect } from 'react';
 import { useDialog } from '../contexts/DialogContext';
 import JSZip from 'jszip';
 
+
+
+const ItemSearchInput = ({ value, onChange, placeholder, availableItems, inputStyle }) => {
+    const [searchTerm, setSearchTerm] = useState(value);
+    const [isOpen, setIsOpen] = useState(false);
+    const [filteredItems, setFilteredItems] = useState([]);
+
+    useEffect(() => {
+        setSearchTerm(value);
+    }, [value]);
+
+    useEffect(() => {
+        const handleClick = () => setIsOpen(false);
+        window.addEventListener('click', handleClick);
+        return () => window.removeEventListener('click', handleClick);
+    }, []);
+
+    useEffect(() => {
+        if (!searchTerm || !availableItems) {
+            setFilteredItems([]);
+            return;
+        }
+        const filtered = availableItems.filter(item =>
+            item.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            item.category.toLowerCase().includes(searchTerm.toLowerCase())
+        ).slice(0, 50);
+        setFilteredItems(filtered);
+    }, [searchTerm, availableItems]);
+
+    return (
+        <div style={{ position: 'relative', flex: 2 }} onClick={e => e.stopPropagation()}>
+            <div style={{ position: 'relative' }}>
+                <input
+                    placeholder={placeholder || "🔍 Search item ID..."}
+                    value={searchTerm}
+                    onChange={e => {
+                        setSearchTerm(e.target.value);
+                        setIsOpen(true);
+                        onChange(e.target.value);
+                    }}
+                    onFocus={() => setIsOpen(true)}
+                    style={{ ...inputStyle, marginBottom: 0, paddingLeft: '35px' }}
+                />
+                <span style={{
+                    position: 'absolute',
+                    left: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    opacity: 0.5,
+                    pointerEvents: 'none',
+                    fontSize: '14px'
+                }}>🔍</span>
+            </div>
+            {isOpen && filteredItems.length > 0 && (
+                <div style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 5px)',
+                    left: 0,
+                    right: 0,
+                    maxHeight: '250px',
+                    overflowY: 'auto',
+                    background: '#1a2635',
+                    border: '1px solid var(--accent-blue)',
+                    borderRadius: '8px',
+                    zIndex: 9999,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
+                    padding: '5px'
+                }}>
+                    <div style={{ padding: '5px 10px', fontSize: '11px', color: 'var(--accent-blue)', fontWeight: 'bold', borderBottom: '1px solid rgba(0, 150, 255, 0.2)', marginBottom: '5px' }}>
+                        MATCHING ITEMS
+                    </div>
+                    {filteredItems.map((item, idx) => (
+                        <div
+                            key={idx}
+                            onClick={() => {
+                                setSearchTerm(item.id);
+                                onChange(item.id);
+                                setIsOpen(false);
+                            }}
+                            style={{
+                                padding: '10px 12px',
+                                cursor: 'pointer',
+                                borderRadius: '5px',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                fontSize: '13px',
+                                color: 'white',
+                                marginBottom: '2px'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(0, 150, 255, 0.2)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        >
+                            <span style={{ fontWeight: '600' }}>{item.id}</span>
+                            <span style={{ fontSize: '11px', color: 'var(--accent-blue)', background: 'rgba(0, 150, 255, 0.1)', padding: '2px 6px', borderRadius: '10px' }}>{item.category}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+            {isOpen && searchTerm && filteredItems.length === 0 && (
+                <div style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 5px)',
+                    left: 0,
+                    right: 0,
+                    padding: '15px',
+                    background: '#1a2635',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    zIndex: 9999,
+                    textAlign: 'center',
+                    color: 'var(--text-muted)',
+                    fontSize: '13px'
+                }}>
+                    No items found for "{searchTerm}"
+                </div>
+            )}
+        </div>
+    );
+};
+
 export default function InteractionGenerator() {
     const { showAlert, showConfirm } = useDialog();
     const [npcId, setNpcId] = useState('');
@@ -122,9 +243,27 @@ export default function InteractionGenerator() {
         });
     };
 
-    // Derived state for exclusivity
-    const hasQuestOption = dialogue.options.some(o => o.actionType === 'QUEST');
-    const hasShopOption = dialogue.options.some(o => o.actionType === 'SHOP');
+    const [availableItems, setAvailableItems] = useState([]);
+    const [isItemsLoading, setIsItemsLoading] = useState(true);
+
+    useEffect(() => {
+        fetch('/items.json')
+            .then(res => res.json())
+            .then(data => {
+                const flatItems = [];
+                Object.entries(data).forEach(([category, ids]) => {
+                    ids.forEach(id => {
+                        flatItems.push({ id, category });
+                    });
+                });
+                setAvailableItems(flatItems);
+                setIsItemsLoading(false);
+            })
+            .catch(err => {
+                console.error('Failed to load items.json:', err);
+                setIsItemsLoading(false);
+            });
+    }, []);
 
     const generateZip = async () => {
         if (!npcId) {
@@ -492,15 +631,16 @@ export default function InteractionGenerator() {
                                             <option value="COLLECT">Collect</option>
                                             <option value="KILL">Kill</option>
                                         </select>
-                                        <input
+                                        <ItemSearchInput
                                             placeholder="Target ID (e.g. Iron_Bar)"
                                             value={obj.target}
-                                            onChange={e => {
+                                            availableItems={availableItems}
+                                            inputStyle={inputStyle}
+                                            onChange={val => {
                                                 const newObjs = [...quest.objectives];
-                                                newObjs[i].target = e.target.value;
+                                                newObjs[i].target = val;
                                                 setQuest({ ...quest, objectives: newObjs });
                                             }}
-                                            style={{ ...inputStyle, flex: 2 }}
                                         />
                                         <input
                                             type="number"
@@ -545,15 +685,16 @@ export default function InteractionGenerator() {
                                             <option value="ITEM">Item</option>
                                         </select>
                                         {rew.type === 'ITEM' && (
-                                            <input
+                                            <ItemSearchInput
                                                 placeholder="Item ID"
                                                 value={rew.id || ''}
-                                                onChange={e => {
+                                                availableItems={availableItems}
+                                                inputStyle={inputStyle}
+                                                onChange={val => {
                                                     const newRews = [...quest.rewards];
-                                                    newRews[i].id = e.target.value;
+                                                    newRews[i].id = val;
                                                     setQuest({ ...quest, rewards: newRews });
                                                 }}
-                                                style={{ ...inputStyle, flex: 2 }}
                                             />
                                         )}
                                         <input
@@ -621,15 +762,16 @@ export default function InteractionGenerator() {
                                 </div>
                                 {shop.items.map((item, i) => (
                                     <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.5fr 0.5fr 1fr auto', gap: '8px', marginBottom: '8px' }}>
-                                        <input
+                                        <ItemSearchInput
                                             placeholder="ID (e.g. Weapon_Sword)"
                                             value={item.id}
-                                            onChange={e => {
+                                            availableItems={availableItems}
+                                            inputStyle={inputStyle}
+                                            onChange={val => {
                                                 const newItems = [...shop.items];
-                                                newItems[i].id = e.target.value;
+                                                newItems[i].id = val;
                                                 setShop({ ...shop, items: newItems });
                                             }}
-                                            style={inputStyle}
                                         />
                                         <input
                                             placeholder="Name (e.g. Iron Sword)"
