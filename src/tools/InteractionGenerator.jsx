@@ -151,7 +151,9 @@ export default function InteractionGenerator() {
         isStatic: true,
         motionWander: false,
         greetRange: 5,
-        greetAnimation: 'Wave'
+        greetAnimation: 'Wave',
+        maxHealth: 100,
+        maxSpeed: 0.1
     });
 
     useEffect(() => {
@@ -313,7 +315,9 @@ export default function InteractionGenerator() {
                 MotionStatic: roleConfig.isStatic,
                 MotionWander: roleConfig.motionWander,
                 GreetRange: roleConfig.greetRange,
-                GreetAnimation: roleConfig.greetAnimation
+                GreetAnimation: roleConfig.greetAnimation,
+                MaxHealth: roleConfig.maxHealth,
+                MaxSpeed: roleConfig.maxSpeed
             }
         };
 
@@ -594,13 +598,32 @@ export default function InteractionGenerator() {
                                 />
                             </div>
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px', marginTop: '10px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: '20px', marginTop: '10px' }}>
                             <div>
                                 <label>Greet Range</label>
                                 <input
                                     type="number"
                                     value={roleConfig.greetRange}
                                     onChange={e => setRoleConfig({ ...roleConfig, greetRange: parseInt(e.target.value) || 0 })}
+                                    style={inputStyle}
+                                />
+                            </div>
+                            <div>
+                                <label>Max Health</label>
+                                <input
+                                    type="number"
+                                    value={roleConfig.maxHealth}
+                                    onChange={e => setRoleConfig({ ...roleConfig, maxHealth: parseInt(e.target.value) || 0 })}
+                                    style={inputStyle}
+                                />
+                            </div>
+                            <div>
+                                <label>Max Speed</label>
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    value={roleConfig.maxSpeed}
+                                    onChange={e => setRoleConfig({ ...roleConfig, maxSpeed: parseFloat(e.target.value) || 0 })}
                                     style={inputStyle}
                                 />
                             </div>
