@@ -11,6 +11,10 @@ export default function NPCGenerator() {
   const [behaviorType, setBehaviorType] = useState('Interactive');
   const [status, setStatus] = useState('');
   const [results, setResults] = useState(null);
+  const [detectedModels, setDetectedModels] = useState([]); // {id, file, rel, main}
+  const [detectedTextures, setDetectedTextures] = useState([]);
+  const [draggedIdx, setDraggedIdx] = useState(null);
+  const [draggedOverIdx, setDraggedOverIdx] = useState(null);
 
   const handleFolderSelect = async (e) => {
     const selectedFiles = Array.from(e.target.files);
@@ -19,9 +23,35 @@ export default function NPCGenerator() {
     if (selectedFiles.length > 0) {
       const firstPath = selectedFiles[0].webkitRelativePath;
       const pathParts = firstPath.split('/');
-      // The first part of the path is the root folder selected by the user
       const detectedName = pathParts[0];
       setNpcName(detectedName);
+
+      const models = selectedFiles
+        .filter(f => f.name.endsWith('.blockymodel'))
+        .map((f, index) => ({
+          id: f.name.replace('.blockymodel', ''),
+          file: f.name,
+          rel: f.webkitRelativePath,
+          main: f.name.toLowerCase().includes('model') || f.name.toLowerCase().includes('main') || index === 0
+        }));
+
+      const textures = selectedFiles
+        .filter(f => f.name.endsWith('.png'))
+        .map(f => ({
+          file: f.name,
+          rel: f.webkitRelativePath
+        }));
+
+      // Ensure only one main model
+      let hasMain = false;
+      models.forEach(m => {
+        if (m.main && !hasMain) hasMain = true;
+        else m.main = false;
+      });
+      if (!hasMain && models.length > 0) models[0].main = true;
+
+      setDetectedModels(models);
+      setDetectedTextures(textures);
     }
 
     setStatus(`${selectedFiles.length} files loaded`);
@@ -49,92 +79,48 @@ export default function NPCGenerator() {
       return `NPC/${npcName}/${parts.join('/')}`;
     };
 
-    const allModels = files
-      .filter(f => f.name.endsWith('.blockymodel'))
-      .map(f => ({
-        file: f.name,
-        rel: f.webkitRelativePath,
-        fullPath: f.webkitRelativePath,
-        fileObj: f
-      }));
+    // Use user-defined configuration from state
+    const mainModel = detectedModels.find(m => m.main) || detectedModels[0];
+    const otherModels = detectedModels.filter(m => !m.main);
 
-    const allTextures = files
-      .filter(f => f.name.endsWith('.png'))
-      .map(f => ({
-        file: f.name,
-        rel: f.webkitRelativePath,
-        fullPath: f.webkitRelativePath,
-        fileObj: f
-      }));
-
-    if (allModels.length === 0) {
-      showAlert('No .blockymodel files found in the selected folder.', 'Models Not Found');
-      return;
-    }
-
-    let mainModel = null;
-
-    if (mainModelName) {
-      mainModel = allModels.find(m =>
-        m.file.toLowerCase().includes(mainModelName.toLowerCase())
-      );
-    }
-
-    if (!mainModel) {
-      mainModel = allModels.find(m =>
-        m.file.toLowerCase() === 'model.blockymodel' ||
-        m.file.toLowerCase().includes(npcName.toLowerCase()) ||
-        m.file.toLowerCase().includes('main')
-      );
-    }
-
-    if (!mainModel) {
-      mainModel = allModels[0];
-    }
-
-    const mainTexture = allTextures.find(t =>
-      t.file.toLowerCase().includes(
-        mainModel.file.replace('.blockymodel', '').toLowerCase()
-      )
-    ) || allTextures.find(t =>
+    const mainTexture = detectedTextures.find(t =>
+      t.file.toLowerCase().includes(mainModel.id.toLowerCase())
+    ) || detectedTextures.find(t =>
       t.file.toLowerCase().includes('greyscale') ||
       t.file.toLowerCase().includes(npcName.toLowerCase())
-    ) || allTextures[0] || { rel: '' };
+    ) || detectedTextures[0] || { rel: '' };
 
-    const attachments = allModels
-      .filter(m => m !== mainModel)
-      .map(m => {
-        const modelNameClean = m.file.replace('.blockymodel', '').toLowerCase();
-        const textureMatch = allTextures.find(t =>
-          modelNameClean.includes(t.file.replace('.png', '').toLowerCase())
-        );
+    const attachments = otherModels.map(m => {
+      const modelNameClean = m.id.toLowerCase();
+      const textureMatch = detectedTextures.find(t =>
+        modelNameClean.includes(t.file.replace('.png', '').toLowerCase())
+      );
 
-        const item = {
-          Model: normalizePath(m.rel),
-          Texture: textureMatch ? normalizePath(textureMatch.rel) : (mainTexture.rel ? normalizePath(mainTexture.rel) : '')
-        };
+      const item = {
+        Model: normalizePath(m.rel),
+        Texture: textureMatch ? normalizePath(textureMatch.rel) : (mainTexture.rel ? normalizePath(mainTexture.rel) : '')
+      };
 
-        const mLower = m.file.toLowerCase();
+      const mLower = m.file.toLowerCase();
+      if (['hair', 'greaser', 'beard'].some(x => mLower.includes(x))) {
+        item.GradientSet = 'Hair';
+        item.GradientId = 'Black';
+      } else if (['ears', 'mouth', 'face', 'eyes'].some(x => mLower.includes(x))) {
+        item.GradientSet = 'Skin';
+        item.GradientId = '03';
+      } else if (['tshirt', 'shirt', 'top', 'vneck', 'armor'].some(x => mLower.includes(x))) {
+        item.GradientSet = 'Fantasy_Cotton';
+        item.GradientId = 'Brown';
+      } else if (['pants', 'shorts', 'leg', 'shorty'].some(x => mLower.includes(x))) {
+        item.GradientSet = 'Jean_Generic';
+        item.GradientId = 'Green';
+      } else if (['boots', 'shoes', 'gloves'].some(x => mLower.includes(x))) {
+        item.GradientSet = 'Fantasy_Cotton';
+        item.GradientId = 'Brown';
+      }
 
-        if (['hair', 'greaser', 'beard'].some(x => mLower.includes(x))) {
-          item.GradientSet = 'Hair';
-          item.GradientId = 'Black';
-        } else if (['ears', 'mouth', 'face', 'eyes'].some(x => mLower.includes(x))) {
-          item.GradientSet = 'Skin';
-          item.GradientId = '03';
-        } else if (['tshirt', 'shirt', 'top', 'vneck', 'armor'].some(x => mLower.includes(x))) {
-          item.GradientSet = 'Fantasy_Cotton';
-          item.GradientId = 'Brown';
-        } else if (['pants', 'shorts', 'leg', 'shorty'].some(x => mLower.includes(x))) {
-          item.GradientSet = 'Jean_Generic';
-          item.GradientId = 'Green';
-        } else if (['boots', 'shoes', 'gloves'].some(x => mLower.includes(x))) {
-          item.GradientSet = 'Fantasy_Cotton';
-          item.GradientId = 'Brown';
-        }
-
-        return item;
-      });
+      return item;
+    });
 
     const appearance = {
       Parent: 'Player',
@@ -420,6 +406,189 @@ export default function NPCGenerator() {
 
       </div>
 
+      {/* Model Management & Priorities */}
+      {detectedModels.length > 0 && (
+        <div style={{
+          marginBottom: '30px',
+          background: 'rgba(255,255,255,0.03)',
+          borderRadius: '12px',
+          padding: '24px',
+          border: '1px solid var(--border-color)'
+        }}>
+          <h3 style={{ marginTop: 0, fontSize: '18px', fontWeight: '600', color: 'var(--text-highlight)' }}>
+            Model Management & Priorities
+          </h3>
+
+          {/* Main Model - Fixed Section */}
+          <div style={{ marginBottom: '25px' }}>
+            <div style={{ fontSize: '12px', color: 'var(--accent-blue)', fontWeight: 'bold', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              Base Model (Body)
+            </div>
+            {detectedModels.filter(m => m.main).map((model) => (
+              <div key={model.id} style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '15px',
+                padding: '16px',
+                background: 'rgba(0, 150, 255, 0.1)',
+                border: '1px solid var(--accent-blue)',
+                borderRadius: '8px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+              }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: '700', fontSize: '15px', color: 'white' }}>{model.id}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{model.rel}</div>
+                </div>
+                <div style={{ fontSize: '10px', background: 'var(--accent-blue)', padding: '4px 8px', borderRadius: '4px', fontWeight: 'bold' }}>
+                  FIXED ROOT
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <hr style={{ border: 'none', borderTop: '1px solid rgba(255,255,255,0.1)', margin: '20px 0' }} />
+
+          {/* Attachments - Draggable Section */}
+          <div onDragOver={(e) => e.preventDefault()}>
+            <div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 'bold', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '1px', display: 'flex', justifyContent: 'space-between' }}>
+                <span>Attachments (Drag to reorder priority)</span>
+                <span style={{ fontSize: '10px', opacity: 0.6 }}>Top = Higher Priority</span>
+              </div>
+
+              <div
+                style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
+                onDragOver={(e) => e.preventDefault()}
+              >
+                {detectedModels.filter(m => !m.main).map((model, idx) => {
+                  const isDragging = draggedIdx === idx;
+                  const isOver = draggedOverIdx === idx;
+
+                  return (
+                    <div
+                      key={model.id}
+                      draggable
+                      onDragStart={(e) => {
+                        setDraggedIdx(idx);
+                        e.dataTransfer.effectAllowed = "move";
+                        // Smaller ghost image
+                        const ghost = e.currentTarget.cloneNode(true);
+                        ghost.style.width = "200px";
+                        ghost.style.position = "absolute";
+                        ghost.style.top = "-1000px";
+                        document.body.appendChild(ghost);
+                        e.dataTransfer.setDragImage(ghost, 0, 0);
+                        setTimeout(() => document.body.removeChild(ghost), 0);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedIdx(null);
+                        setDraggedOverIdx(null);
+                      }}
+                      onDragEnter={(e) => {
+                        e.preventDefault();
+                        setDraggedOverIdx(idx);
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setDraggedOverIdx(idx);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (draggedIdx === null || draggedIdx === idx) return;
+
+                        const attachments = detectedModels.filter(m => !m.main);
+                        const mainModel = detectedModels.find(m => m.main);
+
+                        const newAttachments = [...attachments];
+                        const [movedItem] = newAttachments.splice(draggedIdx, 1);
+                        newAttachments.splice(idx, 0, movedItem);
+
+                        setDetectedModels([mainModel, ...newAttachments]);
+                        setDraggedIdx(null);
+                        setDraggedOverIdx(null);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '15px',
+                        padding: '12px 16px',
+                        background: isDragging ? 'rgba(255,255,255,0.02)' : (isOver ? 'rgba(0, 150, 255, 0.15)' : 'rgba(255,255,255,0.05)'),
+                        border: isOver ? '1px solid var(--accent-blue)' : (isDragging ? '1px dashed rgba(255,255,255,0.2)' : '1px solid rgba(255,255,255,0.1)'),
+                        borderRadius: '8px',
+                        cursor: isDragging ? 'grabbing' : 'grab',
+                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                        opacity: isDragging ? 0.5 : 1,
+                        transform: isOver ? 'scale(1.02)' : 'scale(1)',
+                        position: 'relative',
+                        zIndex: isOver ? 10 : 1
+                      }}
+                    >
+                      <div style={{
+                        color: isOver ? 'var(--accent-blue)' : 'var(--text-muted)',
+                        fontSize: '18px',
+                        width: '24px',
+                        textAlign: 'center'
+                      }}>
+                        {isDragging ? '✋' : '⣿'}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: '600', fontSize: '14px', color: isOver ? 'var(--accent-blue)' : 'white' }}>
+                          {model.id}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {model.rel.split('/').slice(-1)}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '5px' }}>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const all = [...detectedModels];
+                            const mIdx = all.findIndex(m => m.id === model.id);
+                            all.forEach(m => m.main = false);
+                            all[mIdx].main = true;
+                            setDetectedModels(all);
+                          }}
+                          className="btn"
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '11px',
+                            background: 'rgba(255,255,255,0.1)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '4px'
+                          }}
+                        >
+                          Set Main
+                        </button>
+                      </div>
+                      {isOver && draggedIdx !== idx && (
+                        <div style={{
+                          position: 'absolute',
+                          top: draggedIdx < idx ? 'auto' : '-4px',
+                          bottom: draggedIdx > idx ? 'auto' : '-4px',
+                          left: '0',
+                          right: '0',
+                          height: '4px',
+                          background: 'var(--accent-blue)',
+                          borderRadius: '2px',
+                          boxShadow: '0 0 8px var(--accent-blue)'
+                        }} />
+                      )}
+                    </div>
+                  );
+                })}
+
+                {detectedModels.filter(m => !m.main).length === 0 && (
+                  <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '8px' }}>
+                    No extra models found to use as attachments.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Generate Button */}
       <button
         onClick={generateAssets}
@@ -488,7 +657,8 @@ export default function NPCGenerator() {
               fontWeight: '600',
               marginBottom: '12px',
               color: 'rgba(255,255,255,0.9)',
-              fontSize: '14px'
+              fontSize: '14px',
+              outline: 'none'
             }}>
               View Appearance JSON
             </summary>
@@ -512,7 +682,8 @@ export default function NPCGenerator() {
               fontWeight: '600',
               marginBottom: '12px',
               color: 'rgba(255,255,255,0.9)',
-              fontSize: '14px'
+              fontSize: '14px',
+              outline: 'none'
             }}>
               View Role JSON
             </summary>
