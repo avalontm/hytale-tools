@@ -148,7 +148,10 @@ export default function InteractionGenerator() {
     });
     const [roleConfig, setRoleConfig] = useState({
         displayName: '',
-        isStatic: true
+        isStatic: true,
+        motionWander: false,
+        greetRange: 5,
+        greetAnimation: 'Wave'
     });
 
     useEffect(() => {
@@ -307,13 +310,10 @@ export default function InteractionGenerator() {
             Modify: {
                 Appearance: npcId,
                 NameTranslationKey: roleConfig.displayName,
-                ...(roleConfig.isStatic ? {
-                    MotionStatic: true,
-                    MaxSpeed: 0.1
-                } : {
-                    MaxHealth: 100, // Default for non-static
-                    DefaultPlayerAttitude: "Neutral"
-                })
+                MotionStatic: roleConfig.isStatic,
+                MotionWander: roleConfig.motionWander,
+                GreetRange: roleConfig.greetRange,
+                GreetAnimation: roleConfig.greetAnimation
             }
         };
 
@@ -572,7 +572,7 @@ export default function InteractionGenerator() {
                     {/* Step 4: Role Configuration */}
                     <div style={{ marginBottom: '30px' }}>
                         <h3>Step 4: NPC Configuration</h3>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
                             <div>
                                 <label>Display Name (In-Game)</label>
                                 <input
@@ -582,9 +582,48 @@ export default function InteractionGenerator() {
                                     style={inputStyle}
                                     placeholder="e.g. Master Blacksmith"
                                 />
-                                <small style={{ color: 'var(--text-muted)' }}>This name will appear above the NPC. Static behavior is enforced effectively.</small>
+                            </div>
+                            <div>
+                                <label>Greet Animation</label>
+                                <input
+                                    type="text"
+                                    value={roleConfig.greetAnimation}
+                                    onChange={e => setRoleConfig({ ...roleConfig, greetAnimation: e.target.value })}
+                                    style={inputStyle}
+                                    placeholder="e.g. Wave"
+                                />
                             </div>
                         </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px', marginTop: '10px' }}>
+                            <div>
+                                <label>Greet Range</label>
+                                <input
+                                    type="number"
+                                    value={roleConfig.greetRange}
+                                    onChange={e => setRoleConfig({ ...roleConfig, greetRange: parseInt(e.target.value) || 0 })}
+                                    style={inputStyle}
+                                />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '25px' }}>
+                                <input
+                                    type="checkbox"
+                                    id="isStatic"
+                                    checked={roleConfig.isStatic}
+                                    onChange={e => setRoleConfig({ ...roleConfig, isStatic: e.target.checked })}
+                                />
+                                <label htmlFor="isStatic" style={{ cursor: 'pointer', marginBottom: 0 }}>Motion Static</label>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '25px' }}>
+                                <input
+                                    type="checkbox"
+                                    id="motionWander"
+                                    checked={roleConfig.motionWander}
+                                    onChange={e => setRoleConfig({ ...roleConfig, motionWander: e.target.checked })}
+                                />
+                                <label htmlFor="motionWander" style={{ cursor: 'pointer', marginBottom: 0 }}>Motion Wander</label>
+                            </div>
+                        </div>
+                        <small style={{ color: 'var(--text-muted)' }}>Configure basic NPC behavior and look.</small>
                     </div>
 
                     {/* Conditional Editors */}
