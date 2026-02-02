@@ -7,7 +7,7 @@ export default function NPCGenerator() {
   const [files, setFiles] = useState([]);
   const [npcName, setNpcName] = useState('');
   const [mainModelName, setMainModelName] = useState('');
-  const [behaviorType, setBehaviorType] = useState('Passive');
+  const [behaviorType, setBehaviorType] = useState('Interactive');
   const [status, setStatus] = useState('');
   const [results, setResults] = useState(null);
 
@@ -139,74 +139,40 @@ export default function NPCGenerator() {
       Reference: 'Template_Intelligent',
       Modify: {
         Appearance: npcName,
+        MaxHealth: 100,
+        NameTranslationKey: npcName,
+        DefaultPlayerAttitude: 'Neutral',
         Weapons: [],
         OffHand: []
-      },
-      Parameters: {
-        Invulnerable: {
-          Value: behaviorType === 'Interactive',
-          Description: "Whether this NPC is invulnerable."
-        },
-        NameTranslationKey: {
-          Value: `server.npcRoles.${npcName}.name`,
-          Description: "Translation key for NPC name display"
-        }
-      },
-      Invulnerable: { Compute: "Invulnerable" }
+      }
     };
 
     if (behaviorType === 'Aggressive') {
-      role.Modify = {
-        ...role.Modify,
-        DefaultPlayerAttitude: 'Hostile',
-        ViewSector: 250,
-        HearingRange: 10,
-        AttackDistance: 2.5,
-        UseCombatActionEvaluator: true,
-        MaxSpeed: 12,
-        MaxHealth: 200
-      };
+      role.Modify.DefaultPlayerAttitude = 'Hostile';
+      role.Modify.ViewSector = 250;
+      role.Modify.HearingRange = 10;
+      role.Modify.AttackDistance = 2.5;
+      role.Modify.UseCombatActionEvaluator = true;
+      role.Modify.MaxSpeed = 12;
+      role.Modify.MaxHealth = 200;
     } else if (behaviorType === 'Neutral') {
-      role.Modify = {
-        ...role.Modify,
-        DefaultPlayerAttitude: 'Neutral',
-        MaxHealth: 150,
-        MaxSpeed: 8
-      };
+      role.Modify.DefaultPlayerAttitude = 'Neutral';
+      role.Modify.MaxHealth = 150;
+      role.Modify.MaxSpeed = 8;
     } else if (behaviorType === 'Passive') {
-      role.Modify = {
-        ...role.Modify,
-        DefaultPlayerAttitude: 'Neutral',
-        MaxHealth: 100,
-        MaxSpeed: 6
-      };
+      role.Modify.DefaultPlayerAttitude = 'Neutral';
+      role.Modify.MaxHealth = 100;
+      role.Modify.MaxSpeed = 6;
     } else if (behaviorType === 'Interactive') {
-      // For Interactive, we use a slightly more Generic-like structure but as a Variant for simplicity
-      role.Type = 'Generic';
-      delete role.Reference;
-      delete role.Modify;
+      // Interactive NPCs use Template_Temple for static behavior
+      role.Reference = 'Template_Temple';
+      role.Modify.MotionStatic = true;
+      role.Modify.MaxSpeed = 0.1;
 
-      role = {
-        ...role,
-        StartState: "Idle",
-        DefaultPlayerAttitude: "Neutral",
-        Appearance: npcName,
-        MaxHealth: 100,
-        BusyStates: ["$Interaction"],
-        NameTranslationKey: `server.npcRoles.${npcName}.name`,
-        InteractionInstruction: {
-          Instructions: [
-            {
-              Sensor: { Type: "HasInteracted" },
-              Actions: [
-                { Type: "LockOnInteractionTarget" },
-                { Type: "OpenBarterShop", Shop: npcName },
-                { Type: "State", State: "$Interaction" }
-              ]
-            }
-          ]
-        }
-      };
+      // Remove unnecessary combat defaults for static NPCs
+      delete role.Modify.DefaultPlayerAttitude;
+      delete role.Modify.Weapons;
+      delete role.Modify.OffHand;
     }
 
     setResults({
@@ -236,22 +202,26 @@ export default function NPCGenerator() {
     if (!results) return;
 
     const zip = new JSZip();
+    const serverFolder = zip.folder("Server");
+    const modelsFolder = serverFolder.folder("Models").folder("Human");
+    const npcFolder = serverFolder.folder("NPC");
+    const rolesFolder = npcFolder.folder("Roles");
 
     // Add Appearance JSON
-    zip.file(`${npcName}.json`, JSON.stringify(results.appearance, null, 4));
+    modelsFolder.file(`${npcName}.json`, JSON.stringify(results.appearance, null, 4));
 
     // Add Role JSON
-    zip.file(`${npcName}_Role.json`, JSON.stringify(results.role, null, 4));
+    rolesFolder.file(`${npcName}.json`, JSON.stringify(results.role, null, 4));
 
     try {
       const content = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${npcName}_assets.zip`;
+      link.download = `AvalonNPC_${npcName}.zip`;
       link.click();
       URL.revokeObjectURL(url);
-      showAlert('Your files have been bundled into a ZIP and download has started.', 'Download Ready');
+      showAlert('Your files have been bundled into the complete Server structure ZIP.', 'Download Ready');
     } catch (err) {
       console.error(err);
       showAlert('There was an error generating the ZIP file.', 'Error');
@@ -417,26 +387,32 @@ export default function NPCGenerator() {
             Behavior Type
           </label>
           <div style={{ display: 'flex', gap: '10px' }}>
-            {['Passive', 'Neutral', 'Aggressive', 'Interactive'].map(type => (
-              <button
-                key={type}
-                onClick={() => setBehaviorType(type)}
-                style={{
-                  flex: 1,
-                  padding: '12px',
-                  background: behaviorType === type ? 'var(--accent-blue)' : 'rgba(255,255,255,0.05)',
-                  border: `1px solid ${behaviorType === type ? 'var(--accent-blue)' : 'var(--border-color)'}`,
-                  borderRadius: '10px',
-                  color: behaviorType === type ? 'white' : 'var(--text-secondary)',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  transition: 'all 0.3s'
-                }}
-              >
-                {type}
-              </button>
-            ))}
+            {['Interactive', 'Passive', 'Neutral', 'Aggressive'].map(type => {
+              const isDisabled = type !== 'Interactive';
+              return (
+                <button
+                  key={type}
+                  onClick={() => !isDisabled && setBehaviorType(type)}
+                  disabled={isDisabled}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    background: behaviorType === type ? 'var(--accent-blue)' : 'rgba(255,255,255,0.05)',
+                    border: `1px solid ${behaviorType === type ? 'var(--accent-blue)' : 'var(--border-color)'}`,
+                    borderRadius: '10px',
+                    color: behaviorType === type ? 'white' : 'var(--text-secondary)',
+                    cursor: isDisabled ? 'not-allowed' : 'pointer',
+                    opacity: isDisabled ? 0.5 : 1,
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    transition: 'all 0.3s'
+                  }}
+                  title={isDisabled ? "Temporarily disabled waiting for templates" : ""}
+                >
+                  {type}
+                </button>
+              );
+            })}
           </div>
           <small style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '10px', display: 'block' }}>
             {behaviorType === 'Aggressive' && 'Attacks players on sight. High speed and health.'}

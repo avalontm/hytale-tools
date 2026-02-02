@@ -35,8 +35,8 @@ export function DialogProvider({ children }) {
         return showDialog({ title, message, type: 'alert' });
     }, [showDialog]);
 
-    const showConfirm = useCallback((message, title = 'Confirm') => {
-        return showDialog({ title, message, type: 'confirm' });
+    const showConfirm = useCallback((message, title = 'Confirm', options = {}) => {
+        return showDialog({ title, message, type: 'confirm', ...options });
     }, [showDialog]);
 
     const showPrompt = useCallback((message, defaultValue = '', title = 'Input') => {
@@ -82,6 +82,8 @@ export function DialogProvider({ children }) {
                 onInputChange={setInputValue}
                 onConfirm={handleConfirm}
                 onCancel={handleCancel}
+                isDestructive={dialogState.isDestructive}
+                confirmText={dialogState.confirmText}
             />
         </DialogContext.Provider>
     );

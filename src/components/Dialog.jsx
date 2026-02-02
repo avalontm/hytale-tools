@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { X } from 'lucide-react';
 
-function Dialog({ isOpen, title, message, type = 'info', onConfirm, onCancel, inputPlaceholder, inputValue, onInputChange }) {
+function Dialog({ isOpen, title, message, type = 'info', onConfirm, onCancel, inputPlaceholder, inputValue, onInputChange, isDestructive, confirmText }) {
     const inputRef = useRef(null);
 
     useEffect(() => {
@@ -106,10 +106,10 @@ function Dialog({ isOpen, title, message, type = 'info', onConfirm, onCancel, in
                         </button>
                     )}
                     <button
-                        className={`btn ${type === 'alert' && title === 'Error' ? 'btn-danger' : 'btn-primary'}`}
+                        className={`btn ${isDestructive || (type === 'alert' && title === 'Error') ? 'btn-danger' : 'btn-primary'}`}
                         onClick={onConfirm}
                     >
-                        {type === 'confirm' ? 'Confirm' : 'OK'}
+                        {confirmText || (type === 'confirm' ? 'Confirm' : 'OK')}
                     </button>
                 </div>
             </div>

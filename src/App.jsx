@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 
 // Importar tools (puedes agregar más aquí)
 import NPCGenerator from './tools/NPCGenerator';
+import InteractionGenerator from './tools/InteractionGenerator';
 import Home from './pages/Home';
 import Documentation from './pages/Documentation';
 import About from './pages/About';
@@ -16,9 +17,17 @@ function App() {
       id: 'npc-generator',
       name: 'NPC Generator',
       description: 'Generate JSON appearance and role files for NPCs using Blockbench models',
-      icon: null,
+      icon: '👤',
       category: 'Character',
       component: NPCGenerator
+    },
+    {
+      id: 'interaction-generator',
+      name: 'Interaction Generator',
+      description: 'Create Dialogues, Quests, and Shops for existing NPCs',
+      icon: '💬',
+      category: 'Gameplay',
+      component: InteractionGenerator
     }
   ];
 
