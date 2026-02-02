@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useDialog } from '../contexts/DialogContext';
 import JSZip from 'jszip';
+import { createNpcRole, DEFAULT_NPC_ROLE_VALUES } from '../utils/hytaleFormat';
 
 
 
@@ -148,12 +149,7 @@ export default function InteractionGenerator() {
     });
     const [roleConfig, setRoleConfig] = useState({
         displayName: '',
-        isStatic: true,
-        motionWander: false,
-        greetRange: 5,
-        greetAnimation: 'Wave',
-        maxHealth: 100,
-        maxSpeed: 0.1
+        ...DEFAULT_NPC_ROLE_VALUES
     });
 
     useEffect(() => {
@@ -305,21 +301,11 @@ export default function InteractionGenerator() {
             interactionData[interactionId].shopId = `${npcId.toLowerCase()}_shop`;
         }
 
-        // 1b. Generate Updated Role JSON
-        const roleData = {
-            Type: "Variant",
-            Reference: roleConfig.isStatic ? "Template_Temple" : "Template_Intelligent",
-            Modify: {
-                Appearance: npcId,
-                NameTranslationKey: roleConfig.displayName,
-                MotionStatic: roleConfig.isStatic,
-                MotionWander: roleConfig.motionWander,
-                GreetRange: roleConfig.greetRange,
-                GreetAnimation: roleConfig.greetAnimation,
-                MaxHealth: roleConfig.maxHealth,
-                MaxSpeed: roleConfig.maxSpeed
-            }
-        };
+        // 1b. Generate Updated Role JSON using shared utility
+        const roleData = createNpcRole({
+            id: npcId,
+            ...roleConfig
+        });
 
         // Add Role to ZIP
         npcFolder.folder("Roles").file(`${npcId}.json`, JSON.stringify(roleData, null, 4));
@@ -598,32 +584,13 @@ export default function InteractionGenerator() {
                                 />
                             </div>
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: '20px', marginTop: '10px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px', marginTop: '10px' }}>
                             <div>
                                 <label>Greet Range</label>
                                 <input
                                     type="number"
                                     value={roleConfig.greetRange}
                                     onChange={e => setRoleConfig({ ...roleConfig, greetRange: parseInt(e.target.value) || 0 })}
-                                    style={inputStyle}
-                                />
-                            </div>
-                            <div>
-                                <label>Max Health</label>
-                                <input
-                                    type="number"
-                                    value={roleConfig.maxHealth}
-                                    onChange={e => setRoleConfig({ ...roleConfig, maxHealth: parseInt(e.target.value) || 0 })}
-                                    style={inputStyle}
-                                />
-                            </div>
-                            <div>
-                                <label>Max Speed</label>
-                                <input
-                                    type="number"
-                                    step="0.1"
-                                    value={roleConfig.maxSpeed}
-                                    onChange={e => setRoleConfig({ ...roleConfig, maxSpeed: parseFloat(e.target.value) || 0 })}
                                     style={inputStyle}
                                 />
                             </div>

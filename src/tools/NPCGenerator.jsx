@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useDialog } from '../contexts/DialogContext';
 import JSZip from 'jszip';
+import { createNpcRole } from '../utils/hytaleFormat';
 
 export default function NPCGenerator() {
   const { showAlert } = useDialog();
@@ -18,7 +19,8 @@ export default function NPCGenerator() {
     if (selectedFiles.length > 0) {
       const firstPath = selectedFiles[0].webkitRelativePath;
       const pathParts = firstPath.split('/');
-      const detectedName = pathParts[pathParts.length - 2] || pathParts[0];
+      // The first part of the path is the root folder selected by the user
+      const detectedName = pathParts[0];
       setNpcName(detectedName);
     }
 
@@ -37,6 +39,15 @@ export default function NPCGenerator() {
     }
 
     setStatus('Processing...');
+
+    // Helper to normalize paths to Hytale format: NPC/[npcName]/[InternalPath]
+    const normalizePath = (path) => {
+      if (!path) return '';
+      const parts = path.split('/');
+      // Remove the local root folder and prepend NPC/[npcName]
+      parts.shift();
+      return `NPC/${npcName}/${parts.join('/')}`;
+    };
 
     const allModels = files
       .filter(f => f.name.endsWith('.blockymodel'))
@@ -99,8 +110,8 @@ export default function NPCGenerator() {
         );
 
         const item = {
-          Model: m.rel,
-          Texture: textureMatch ? textureMatch.rel : (mainTexture.rel || '')
+          Model: normalizePath(m.rel),
+          Texture: textureMatch ? normalizePath(textureMatch.rel) : (mainTexture.rel ? normalizePath(mainTexture.rel) : '')
         };
 
         const mLower = m.file.toLowerCase();
@@ -127,25 +138,19 @@ export default function NPCGenerator() {
 
     const appearance = {
       Parent: 'Player',
-      Model: mainModel.rel,
-      Texture: mainTexture.rel || '',
+      Model: normalizePath(mainModel.rel),
+      Texture: mainTexture.rel ? normalizePath(mainTexture.rel) : '',
       GradientSet: 'Skin',
       GradientId: '03',
       DefaultAttachments: attachments
     };
 
-    let role = {
-      Type: 'Variant',
-      Reference: 'Template_Intelligent',
-      Modify: {
-        Appearance: npcName,
-        MaxHealth: 100,
-        NameTranslationKey: npcName,
-        DefaultPlayerAttitude: 'Neutral',
-        Weapons: [],
-        OffHand: []
-      }
-    };
+    const role = createNpcRole({
+      id: npcName,
+      displayName: npcName,
+      behaviorType,
+      isStatic: behaviorType === 'Interactive'
+    });
 
     if (behaviorType === 'Aggressive') {
       role.Modify.DefaultPlayerAttitude = 'Hostile';
@@ -163,22 +168,12 @@ export default function NPCGenerator() {
       role.Modify.DefaultPlayerAttitude = 'Neutral';
       role.Modify.MaxHealth = 100;
       role.Modify.MaxSpeed = 6;
-    } else if (behaviorType === 'Interactive') {
-      // Interactive NPCs use Template_Temple for static behavior
-      role.Reference = 'Template_Temple';
-      role.Modify.MotionStatic = true;
-      role.Modify.MaxSpeed = 0.1;
-
-      // Remove unnecessary combat defaults for static NPCs
-      delete role.Modify.DefaultPlayerAttitude;
-      delete role.Modify.Weapons;
-      delete role.Modify.OffHand;
     }
 
     setResults({
       appearance,
       role,
-      mainModelPath: mainModel.rel,
+      mainModelPath: normalizePath(mainModel.rel),
       attachmentsCount: attachments.length
     });
 
