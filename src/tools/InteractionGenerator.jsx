@@ -565,7 +565,17 @@ export default function InteractionGenerator() {
                             >Reset</button>
                         </div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px', padding: '15px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '15px', padding: '15px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+                            <div>
+                                <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>File Name / NPC ID</label>
+                                <input
+                                    value={npcId}
+                                    onChange={e => setNpcId(e.target.value.toLowerCase().replace(/\s+/g, '_'))}
+                                    style={{ ...inputStyle, marginBottom: 0, marginTop: '5px', borderColor: 'var(--accent-blue)', fontWeight: 'bold' }}
+                                    placeholder="e.g. bartender"
+                                />
+                                <small style={{ color: 'rgba(0, 150, 255, 0.5)', fontSize: '9px' }}>Determines all filenames</small>
+                            </div>
                             <div>
                                 <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>NameTranslationKey</label>
                                 <input
