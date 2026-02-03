@@ -150,6 +150,7 @@ export default function InteractionGenerator() {
     });
     const [roleConfig, setRoleConfig] = useState({
         displayName: '',
+        appearance: '',
         ...DEFAULT_NPC_ROLE_VALUES
     });
 
@@ -168,16 +169,29 @@ export default function InteractionGenerator() {
         reader.onload = (event) => {
             try {
                 const json = JSON.parse(event.target.result);
-                let detectedId = file.name.replace('.json', '');
+                const fileName = file.name.replace('.json', '');
 
-                // Strictly check for Role file
-                if (json.Modify && json.Modify.Appearance) {
-                    detectedId = json.Modify.Appearance;
-                    setNpcId(detectedId);
-                    setDialogue(prev => ({ ...prev, title: detectedId }));
-                    setRoleConfig(prev => ({ ...prev, displayName: detectedId }));
+                // Use original filename AS the npcId
+                setNpcId(fileName);
+
+                // Strictly check for Role file details
+                if (json.Modify) {
+                    const appearance = json.Modify.Appearance || fileName;
+                    const displayName = json.Modify.NameTranslationKey || fileName;
+
+                    setDialogue(prev => ({ ...prev, title: displayName }));
+                    setRoleConfig({
+                        ...DEFAULT_NPC_ROLE_VALUES,
+                        appearance: appearance,
+                        displayName: displayName,
+                        greetAnimation: json.Modify.GreetAnimation || DEFAULT_NPC_ROLE_VALUES.greetAnimation,
+                        greetRange: json.Modify.GreetRange || DEFAULT_NPC_ROLE_VALUES.greetRange,
+                        isStatic: json.Modify.MotionStatic !== undefined ? json.Modify.MotionStatic : DEFAULT_NPC_ROLE_VALUES.isStatic,
+                        motionWander: json.Modify.MotionWander !== undefined ? json.Modify.MotionWander : DEFAULT_NPC_ROLE_VALUES.motionWander,
+                    });
+
                     setFileLoaded(true);
-                    showAlert(`Loaded NPC Role: ${detectedId}`, 'Success');
+                    showAlert(`Loaded NPC Role: ${fileName}`, 'Success');
                 } else {
                     showAlert('Please upload a valid NPC Role file first.', 'Warning');
                 }
@@ -220,8 +234,16 @@ export default function InteractionGenerator() {
                             return { ...opt, actionType };
                         })
                     });
-                    if (data.questId) setInteractionType('QUEST');
-                    else if (data.shopId) setInteractionType('SHOP');
+
+                    // Explicitly detect type based on ID presence
+                    if (data.questId) {
+                        setInteractionType('QUEST');
+                    } else if (data.shopId) {
+                        setInteractionType('SHOP');
+                    } else {
+                        setInteractionType('DIALOG_ONLY');
+                    }
+
                     setInteractionLoaded(true);
                     showAlert(`Loaded Interaction: ${firstKey}`, 'Success');
                 } else {
@@ -376,16 +398,31 @@ export default function InteractionGenerator() {
 
         // 1. Generate Interaction JSON
         const interactionId = npcId;
+        const qId = `${npcId.toLowerCase()}_quest`;
+        const sId = `${npcId.toLowerCase()}_shop`;
+
         const interactionData = {
             [interactionId]: {
                 type: "DIALOG",
                 title: dialogue.title,
                 text: dialogue.text,
                 ...(interactionType === 'QUEST' && { completedText: dialogue.completedText }),
-                options: dialogue.options.map(opt => ({
-                    text: opt.text,
-                    action: opt.action
-                }))
+                options: dialogue.options.map(opt => {
+                    let action = opt.action;
+                    // Auto-correct actions to match current NPC IDs
+                    if (interactionType === 'QUEST' && action) {
+                        if (action.startsWith('ACCEPT_QUEST:')) action = `ACCEPT_QUEST:${qId}`;
+                        else if (action.startsWith('CHECK_QUEST:')) action = `CHECK_QUEST:${qId}`;
+                        else if (action.startsWith('HIDE_IF_COMPLETED:')) action = `HIDE_IF_COMPLETED:${qId}`;
+                        else if (action.startsWith('SHOW_IF_COMPLETED:')) action = `SHOW_IF_COMPLETED:${qId}`;
+                    } else if (interactionType === 'SHOP' && action && action.startsWith('OPEN_SHOP:')) {
+                        action = `OPEN_SHOP:${sId}`;
+                    }
+                    return {
+                        text: opt.text,
+                        action: action
+                    };
+                })
             }
         };
 
@@ -516,20 +553,52 @@ export default function InteractionGenerator() {
                 </label>
 
                 {fileLoaded && (
-                    <div style={{ marginTop: '20px', padding: '15px', background: 'rgba(0, 255, 0, 0.05)', borderRadius: '8px', border: '1px solid var(--accent-green)' }}>
-                        <div style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>Step 2: Load Interaction (Mandatory)</div>
-                        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '5px' }}>
-                            Load the base <span style={{ color: 'var(--accent-blue)' }}>{npcId}_interactions.json</span> file.
-                        </p>
-                        <label style={{ ...btnSmallStyle, display: 'inline-block', marginTop: '10px', background: interactionLoaded ? 'rgba(0,0,0,0.3)' : 'var(--accent-blue)', borderColor: interactionLoaded ? 'var(--border-color)' : 'var(--accent-blue)' }}>
-                            {interactionLoaded ? '✓ Interaction Loaded' : '📂 Select Interaction File'}
-                            <input
-                                type="file"
-                                accept=".json"
-                                onChange={handleSecondaryDataLoad}
-                                style={{ display: 'none' }}
-                            />
-                        </label>
+                    <div style={{ marginTop: '20px', padding: '15px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '12px', border: '1px solid var(--accent-blue)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                            <div style={{ color: 'var(--accent-blue)', fontWeight: 'bold', fontSize: '16px' }}>✓ NPC Role: {npcId}.json</div>
+                            <button
+                                onClick={() => {
+                                    setFileLoaded(false);
+                                    setNpcId('');
+                                }}
+                                style={{ ...btnSmallStyle, background: 'rgba(255,0,0,0.2)', border: '1px solid var(--accent-red)', color: 'var(--accent-red)' }}
+                            >Reset</button>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px', padding: '15px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+                            <div>
+                                <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>NameTranslationKey</label>
+                                <input
+                                    value={roleConfig.displayName}
+                                    onChange={e => setRoleConfig({ ...roleConfig, displayName: e.target.value })}
+                                    style={{ ...inputStyle, marginBottom: 0, marginTop: '5px' }}
+                                />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Appearance (Model ID)</label>
+                                <input
+                                    value={roleConfig.appearance}
+                                    onChange={e => setRoleConfig({ ...roleConfig, appearance: e.target.value })}
+                                    style={{ ...inputStyle, marginBottom: 0, marginTop: '5px' }}
+                                />
+                            </div>
+                        </div>
+
+                        <div style={{ padding: '15px', background: 'rgba(0, 255, 0, 0.05)', borderRadius: '8px', border: '1px solid var(--accent-green)' }}>
+                            <div style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>Step 2: Load Interaction (Mandatory)</div>
+                            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '5px' }}>
+                                Load the base <span style={{ color: 'var(--accent-blue)' }}>{npcId}_interactions.json</span> file.
+                            </p>
+                            <label style={{ ...btnSmallStyle, display: 'inline-block', marginTop: '10px', background: interactionLoaded ? 'rgba(0,0,0,0.3)' : 'var(--accent-blue)', borderColor: interactionLoaded ? 'var(--border-color)' : 'var(--accent-blue)' }}>
+                                {interactionLoaded ? '✓ Interaction Loaded' : '📂 Select Interaction File'}
+                                <input
+                                    type="file"
+                                    accept=".json"
+                                    onChange={handleSecondaryDataLoad}
+                                    style={{ display: 'none' }}
+                                />
+                            </label>
+                        </div>
                     </div>
                 )}
 
@@ -678,9 +747,9 @@ export default function InteractionGenerator() {
                     {/* Step 4: Role Configuration */}
                     <div style={{ marginBottom: '30px' }}>
                         <h3>Step 4: NPC Configuration</h3>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
                             <div>
-                                <label>Display Name (In-Game)</label>
+                                <label>NameTranslationKey (Display Name)</label>
                                 <input
                                     type="text"
                                     value={roleConfig.displayName}
@@ -688,6 +757,17 @@ export default function InteractionGenerator() {
                                     style={inputStyle}
                                     placeholder="e.g. Master Blacksmith"
                                 />
+                            </div>
+                            <div>
+                                <label>Appearance (Model ID)</label>
+                                <input
+                                    type="text"
+                                    value={roleConfig.appearance}
+                                    onChange={e => setRoleConfig({ ...roleConfig, appearance: e.target.value })}
+                                    style={inputStyle}
+                                    placeholder="e.g. Human"
+                                />
+                                <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: '-5px', fontSize: '10px' }}>Internal model ID (e.g. Human, Undead)</small>
                             </div>
                             <div>
                                 <label>Greet Animation</label>
@@ -761,9 +841,21 @@ export default function InteractionGenerator() {
 
                             {/* Objectives Editor */}
                             <div style={{ marginTop: '15px' }}>
-                                <label>Quest Objectives</label>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                    <label style={{ margin: 0 }}>Quest Objectives</label>
+                                    <button onClick={() => setQuest({
+                                        ...quest,
+                                        objectives: [...quest.objectives, { type: 'COLLECT', target: '', amount: 1 }]
+                                    })} style={{ ...btnSmallStyle, background: 'var(--accent-blue)' }}>+ Add Objective</button>
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 0.8fr auto', gap: '10px', marginBottom: '5px', fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold' }}>
+                                    <div>TYPE</div>
+                                    <div>TARGET (ID)</div>
+                                    <div>AMOUNT</div>
+                                    <div></div>
+                                </div>
                                 {quest.objectives.map((obj, i) => (
-                                    <div key={i} style={{ display: 'flex', gap: '10px', marginBottom: '8px' }}>
+                                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 0.8fr auto', gap: '10px', marginBottom: '8px', alignItems: 'center' }}>
                                         <select
                                             value={obj.type}
                                             onChange={e => {
@@ -803,20 +895,28 @@ export default function InteractionGenerator() {
                                                 const newObjs = quest.objectives.filter((_, idx) => idx !== i);
                                                 setQuest({ ...quest, objectives: newObjs });
                                             }
-                                        }} style={{ ...btnSmallStyle, background: 'var(--accent-red)' }}>×</button>
+                                        }} style={{ ...btnSmallStyle, background: 'var(--accent-red)', height: '100%' }}>×</button>
                                     </div>
                                 ))}
-                                <button onClick={() => setQuest({
-                                    ...quest,
-                                    objectives: [...quest.objectives, { type: 'COLLECT', target: '', amount: 1 }]
-                                })} style={btnSmallStyle}>+ Add Objective</button>
                             </div>
 
                             {/* Rewards Editor */}
-                            <div style={{ marginTop: '15px' }}>
-                                <label>Quest Rewards</label>
+                            <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                    <label style={{ margin: 0 }}>Quest Rewards</label>
+                                    <button onClick={() => setQuest({
+                                        ...quest,
+                                        rewards: [...quest.rewards, { type: 'MONEY', amount: 100 }]
+                                    })} style={{ ...btnSmallStyle, background: 'var(--accent-green)' }}>+ Add Reward</button>
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 0.8fr auto', gap: '10px', marginBottom: '5px', fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold' }}>
+                                    <div>TYPE</div>
+                                    <div>REWARD</div>
+                                    <div>AMOUNT</div>
+                                    <div></div>
+                                </div>
                                 {quest.rewards.map((rew, i) => (
-                                    <div key={i} style={{ display: 'flex', gap: '10px', marginBottom: '8px' }}>
+                                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 0.8fr auto', gap: '10px', marginBottom: '8px', alignItems: 'center' }}>
                                         <select
                                             value={rew.type}
                                             onChange={e => {
@@ -858,13 +958,9 @@ export default function InteractionGenerator() {
                                                 const newRews = quest.rewards.filter((_, idx) => idx !== i);
                                                 setQuest({ ...quest, rewards: newRews });
                                             }
-                                        }} style={{ ...btnSmallStyle, background: 'var(--accent-red)' }}>×</button>
+                                        }} style={{ ...btnSmallStyle, background: 'var(--accent-red)', height: '100%' }}>×</button>
                                     </div>
                                 ))}
-                                <button onClick={() => setQuest({
-                                    ...quest,
-                                    rewards: [...quest.rewards, { type: 'MONEY', amount: 100 }]
-                                })} style={btnSmallStyle}>+ Add Reward</button>
                             </div>
                         </div>
                     )}

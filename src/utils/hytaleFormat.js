@@ -21,6 +21,7 @@ export const createNpcRole = (config) => {
     const {
         id,
         displayName,
+        appearance,
         isStatic = DEFAULT_NPC_ROLE_VALUES.isStatic,
         motionWander = DEFAULT_NPC_ROLE_VALUES.motionWander,
         greetRange = DEFAULT_NPC_ROLE_VALUES.greetRange,
@@ -37,7 +38,7 @@ export const createNpcRole = (config) => {
         Type: "Variant",
         Reference: template,
         Modify: {
-            Appearance: id,
+            Appearance: appearance || id,
             NameTranslationKey: displayName || id,
             MotionStatic: isStatic,
             MotionWander: motionWander,
