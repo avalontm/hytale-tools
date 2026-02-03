@@ -128,6 +128,7 @@ export default function InteractionGenerator() {
     const { showAlert, showConfirm } = useDialog();
     const [npcId, setNpcId] = useState('');
     const [fileLoaded, setFileLoaded] = useState(false);
+    const [interactionLoaded, setInteractionLoaded] = useState(false);
     const [dialogue, setDialogue] = useState({
         title: '',
         text: '',
@@ -159,7 +160,7 @@ export default function InteractionGenerator() {
         }
     }, [npcId]);
 
-    const handleFileUpload = (e) => {
+    const handleNpcRoleLoad = (e) => {
         const file = e.target.files[0];
         if (!file) return;
 
@@ -167,19 +168,116 @@ export default function InteractionGenerator() {
         reader.onload = (event) => {
             try {
                 const json = JSON.parse(event.target.result);
-                // Attempt to find ID from file content or filename
                 let detectedId = file.name.replace('.json', '');
 
-                // If it's a Role file, looks for Appearance or Modify.Appearance
+                // Strictly check for Role file
                 if (json.Modify && json.Modify.Appearance) {
                     detectedId = json.Modify.Appearance;
+                    setNpcId(detectedId);
+                    setDialogue(prev => ({ ...prev, title: detectedId }));
+                    setRoleConfig(prev => ({ ...prev, displayName: detectedId }));
+                    setFileLoaded(true);
+                    showAlert(`Loaded NPC Role: ${detectedId}`, 'Success');
+                } else {
+                    showAlert('Please upload a valid NPC Role file first.', 'Warning');
                 }
+            } catch (err) {
+                showAlert('Invalid JSON file', 'Error');
+            }
+        };
+        reader.readAsText(file);
+    };
 
-                setNpcId(detectedId);
-                setDialogue(prev => ({ ...prev, title: detectedId }));
-                setRoleConfig(prev => ({ ...prev, displayName: detectedId })); // Default display name
-                setFileLoaded(true);
-                showAlert(`Loaded NPC: ${detectedId}`, 'Success');
+    const handleSecondaryDataLoad = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const json = JSON.parse(event.target.result);
+                const keys = Object.keys(json);
+                if (keys.length === 0) return;
+
+                const firstKey = keys[0];
+                const data = json[firstKey];
+
+                // Check specifically for Interaction file first
+                if (data.type === 'DIALOG') {
+                    setDialogue({
+                        title: data.title || firstKey,
+                        text: data.text || '',
+                        completedText: data.completedText || '',
+                        options: (data.options || []).map(opt => {
+                            let actionType = 'NONE';
+                            if (opt.action) {
+                                if (opt.action.startsWith('ACCEPT_QUEST')) actionType = 'QUEST';
+                                else if (opt.action.startsWith('CHECK_QUEST')) actionType = 'CHECK_QUEST';
+                                else if (opt.action.startsWith('HIDE_IF_COMPLETED')) actionType = 'HIDE_IF_COMPLETED';
+                                else if (opt.action.startsWith('SHOW_IF_COMPLETED')) actionType = 'SHOW_IF_COMPLETED';
+                                else if (opt.action.startsWith('OPEN_SHOP')) actionType = 'SHOP';
+                            }
+                            return { ...opt, actionType };
+                        })
+                    });
+                    if (data.questId) setInteractionType('QUEST');
+                    else if (data.shopId) setInteractionType('SHOP');
+                    setInteractionLoaded(true);
+                    showAlert(`Loaded Interaction: ${firstKey}`, 'Success');
+                } else {
+                    showAlert('Please upload a valid Interaction file (DIALOG) for Step 2.', 'Warning');
+                }
+            } catch (err) {
+                showAlert('Invalid JSON file', 'Error');
+            }
+        };
+        reader.readAsText(file);
+    };
+
+    const handleThirdStepLoad = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const json = JSON.parse(event.target.result);
+                const keys = Object.keys(json);
+                if (keys.length === 0) return;
+
+                const firstKey = keys[0];
+                const data = json[firstKey];
+
+                // 2. Check if it's a Quest file
+                if (data.objectives) {
+                    setQuest({
+                        title: data.title || '',
+                        description: data.description || '',
+                        completionMessage: data.completionMessage || '',
+                        objectives: data.objectives || [],
+                        rewards: data.rewards || []
+                    });
+                    setInteractionType('QUEST');
+                    showAlert(`Loaded Quest data`, 'Success');
+                }
+                // 3. Check if it's a Shop file
+                else if (data.items && data.type) {
+                    setShop({
+                        title: data.title || '',
+                        type: data.type || 'buy',
+                        items: (data.items || []).map(item => ({
+                            id: item.id || '',
+                            name: item.name || item.id || '',
+                            amount: item.amount || 1,
+                            buyPrice: item.buyPrice || 0,
+                            sellPrice: item.sellPrice || 0
+                        }))
+                    });
+                    setInteractionType('SHOP');
+                    showAlert(`Loaded Shop data`, 'Success');
+                } else {
+                    showAlert('Please upload a valid Quest or Shop file for Step 3.', 'Warning');
+                }
             } catch (err) {
                 showAlert('Invalid JSON file', 'Error');
             }
@@ -283,7 +381,7 @@ export default function InteractionGenerator() {
                 type: "DIALOG",
                 title: dialogue.title,
                 text: dialogue.text,
-                ...(quest && { completedText: dialogue.completedText }), // Conditional add
+                ...(interactionType === 'QUEST' && { completedText: dialogue.completedText }),
                 options: dialogue.options.map(opt => ({
                     text: opt.text,
                     action: opt.action
@@ -291,13 +389,11 @@ export default function InteractionGenerator() {
             }
         };
 
-        // Add quest/shop linkage fields
-        if (quest) {
+        // Add quest/shop linkage fields ONLY if matches selected type
+        if (interactionType === 'QUEST') {
             const qId = `${npcId.toLowerCase()}_quest`;
             interactionData[interactionId].questId = qId;
-        }
-
-        if (shop) {
+        } else if (interactionType === 'SHOP') {
             interactionData[interactionId].shopId = `${npcId.toLowerCase()}_shop`;
         }
 
@@ -313,7 +409,7 @@ export default function InteractionGenerator() {
         npcFolder.folder("Interactions").file(`${npcId}_interactions.json`, JSON.stringify(interactionData, null, 4));
 
         // 2. Generate Quest JSON
-        if (quest) {
+        if (interactionType === 'QUEST' && quest) {
             const qId = `${npcId.toLowerCase()}_quest`;
             const questData = {
                 [qId]: {
@@ -329,25 +425,22 @@ export default function InteractionGenerator() {
         }
 
         // 3. Generate Shop JSON
-        if (shop) {
+        if (interactionType === 'SHOP' && shop) {
             const sId = `${npcId.toLowerCase()}_shop`;
 
-            // Format items to flat structure per user request
             const formattedItems = shop.items.map(item => {
                 const flatItem = {
                     id: item.id,
-                    name: item.name || item.id, // Default to ID if name missing
+                    name: item.name || item.id,
                     amount: item.amount || 1
                 };
 
-                // Assign prices based on shop type (or both if we had UI for it)
-                // For now, we map the active UI price to the correct key.
                 if (shop.type === 'buy') {
                     flatItem.buyPrice = item.buyPrice;
-                    flatItem.sellPrice = Math.floor(item.buyPrice / 2); // Default sell price auto-calc
+                    flatItem.sellPrice = Math.floor(item.buyPrice / 2);
                 } else {
                     flatItem.sellPrice = item.sellPrice;
-                    flatItem.buyPrice = item.sellPrice * 2; // Default buy price auto-calc
+                    flatItem.buyPrice = item.sellPrice * 2;
                 }
 
                 return flatItem;
@@ -394,13 +487,9 @@ export default function InteractionGenerator() {
 
             {/* Step 1: Load NPC */}
             <div style={{ marginBottom: '30px', padding: '20px', border: '1px dashed var(--border-color)', borderRadius: '10px' }}>
-                <h3 style={{ marginTop: 0 }}>Step 1: Load NPC JSON</h3>
+                <h3 style={{ marginTop: 0 }}>Step 1: Load NPC Role</h3>
                 <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '15px' }}>
-                    Upload the generated NPC role file to link interactions.
-                    <br />
-                    <span style={{ fontFamily: 'monospace', background: 'rgba(0,0,0,0.3)', padding: '2px 4px', borderRadius: '4px' }}>
-                        \mods\AvalonTMEssentials\Server\NPC\Roles
-                    </span>
+                    Upload the main NPC role file first.
                 </p>
                 <label
                     style={{
@@ -415,37 +504,67 @@ export default function InteractionGenerator() {
                         cursor: 'pointer',
                         transition: 'all 0.3s',
                     }}
-                    onMouseEnter={e => {
-                        e.currentTarget.style.background = 'rgba(0, 150, 255, 0.1)';
-                        e.currentTarget.style.borderColor = 'var(--accent-blue)';
-                    }}
-                    onMouseLeave={e => {
-                        e.currentTarget.style.background = 'rgba(0, 150, 255, 0.05)';
-                    }}
                 >
-                    <div style={{ fontSize: '32px', marginBottom: '10px' }}>📄</div>
-                    <span style={{ fontSize: '16px', fontWeight: '600', color: 'var(--accent-blue)' }}>Click to Select File</span>
-                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '5px' }}>or drag and drop JSON here</span>
+                    <div style={{ fontSize: '32px', marginBottom: '10px' }}>👤</div>
+                    <span style={{ fontSize: '16px', fontWeight: '600', color: 'var(--accent-blue)' }}>{fileLoaded ? 'NPC Role Loaded' : 'Select NPC Role File'}</span>
                     <input
                         type="file"
                         accept=".json"
-                        onChange={handleFileUpload}
+                        onChange={handleNpcRoleLoad}
                         style={{ display: 'none' }}
                     />
                 </label>
-                {fileLoaded && <div style={{ color: 'var(--accent-green)', marginTop: '10px' }}>✓ Targeting NPC ID: <strong>{npcId}</strong></div>}
+
+                {fileLoaded && (
+                    <div style={{ marginTop: '20px', padding: '15px', background: 'rgba(0, 255, 0, 0.05)', borderRadius: '8px', border: '1px solid var(--accent-green)' }}>
+                        <div style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>Step 2: Load Interaction (Mandatory)</div>
+                        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '5px' }}>
+                            Load the base <span style={{ color: 'var(--accent-blue)' }}>{npcId}_interactions.json</span> file.
+                        </p>
+                        <label style={{ ...btnSmallStyle, display: 'inline-block', marginTop: '10px', background: interactionLoaded ? 'rgba(0,0,0,0.3)' : 'var(--accent-blue)', borderColor: interactionLoaded ? 'var(--border-color)' : 'var(--accent-blue)' }}>
+                            {interactionLoaded ? '✓ Interaction Loaded' : '📂 Select Interaction File'}
+                            <input
+                                type="file"
+                                accept=".json"
+                                onChange={handleSecondaryDataLoad}
+                                style={{ display: 'none' }}
+                            />
+                        </label>
+                    </div>
+                )}
+
+                {interactionLoaded && (
+                    <div style={{ marginTop: '15px', padding: '15px', background: 'rgba(0, 150, 255, 0.05)', borderRadius: '8px', border: '1px solid var(--accent-blue)' }}>
+                        <div style={{ color: 'var(--accent-blue)', fontWeight: 'bold' }}>Step 3: Load Quest or Shop (Optional)</div>
+                        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '5px' }}>
+                            Import an existing <span style={{ color: 'var(--accent-blue)' }}>quest.json</span> or <span style={{ color: 'var(--accent-blue)' }}>shop.json</span>.
+                        </p>
+                        <label style={{ ...btnSmallStyle, display: 'inline-block', marginTop: '10px', background: 'var(--accent-blue)', borderColor: 'var(--accent-blue)' }}>
+                            📂 Select Quest/Shop File
+                            <input
+                                type="file"
+                                accept=".json"
+                                onChange={handleThirdStepLoad}
+                                style={{ display: 'none' }}
+                            />
+                        </label>
+                    </div>
+                )}
             </div>
 
             {fileLoaded && (
                 <>
                     {/* Step 2: Interaction Mode */}
                     <div style={{ marginBottom: '30px' }}>
-                        <h3 style={{ marginTop: 0 }}>Step 2: Select Interaction Type</h3>
+                        <h3 style={{ marginTop: 0 }}>Step 2: Define Interaction Type (Required)</h3>
+                        <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '15px' }}>
+                            Every NPC needs an Interaction file. Choose if this interaction links to a Quest or Shop.
+                        </p>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
                             {[
-                                { id: 'QUEST', label: 'Quest Giver', icon: '📜', desc: 'Offers tasks to players with objectives and rewards.' },
-                                { id: 'SHOP', label: 'Merchant', icon: '💰', desc: 'Buys and sells items using a configurable currency.' },
-                                { id: 'DIALOG_ONLY', label: 'Dialogue Only', icon: '💬', desc: 'Simple conversation branching without game logic.' }
+                                { id: 'QUEST', label: 'Quest Giver', icon: '📜', desc: 'Mandatory Dialog + Optional Quest JSON' },
+                                { id: 'SHOP', label: 'Merchant', icon: '💰', desc: 'Mandatory Dialog + Optional Shop JSON' },
+                                { id: 'DIALOG_ONLY', label: 'Dialogue Only', icon: '💬', desc: 'Mandatory Dialog only' }
                             ].map(opt => (
                                 <div
                                     key={opt.id}
@@ -466,18 +585,12 @@ export default function InteractionGenerator() {
                                         alignItems: 'center',
                                         textAlign: 'center'
                                     }}
-                                    onMouseEnter={e => {
-                                        if (interactionType !== opt.id) e.currentTarget.style.borderColor = 'var(--text-secondary)';
-                                    }}
-                                    onMouseLeave={e => {
-                                        if (interactionType !== opt.id) e.currentTarget.style.borderColor = 'var(--border-color)';
-                                    }}
                                 >
                                     <div style={{ fontSize: '32px', marginBottom: '10px' }}>{opt.icon}</div>
                                     <div style={{ fontWeight: 'bold', fontSize: '16px', color: interactionType === opt.id ? 'var(--accent-blue)' : 'white' }}>
                                         {opt.label}
                                     </div>
-                                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '5px' }}>
+                                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '5px' }}>
                                         {opt.desc}
                                     </div>
                                 </div>
@@ -487,7 +600,10 @@ export default function InteractionGenerator() {
 
                     {/* Step 3: Dialogue Editor */}
                     <div style={{ marginBottom: '30px' }}>
-                        <h3>Step 3: Edit Dialogue</h3>
+                        <h3>Step 3: Edit Interaction (Mandatory)</h3>
+                        <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+                            This creates the base <span style={{ color: 'var(--accent-blue)' }}>{npcId}_interactions.json</span> file.
+                        </p>
                         <div style={{ display: 'grid', gap: '15px' }}>
                             <div>
                                 <label>Title</label>
