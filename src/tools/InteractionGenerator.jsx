@@ -208,12 +208,13 @@ export default function InteractionGenerator() {
         if (interactionType === 'QUEST') {
             if (!quest.title) initQuest();
             // If options are just the single default "Goodbye", upgrade to Quest defaults
-            if (dialogue.options.length === 1 && dialogue.options[0].actionType === 'NONE') {
+            if (dialogue.options.length === 1 && (dialogue.options[0].actionType === 'NONE' || dialogue.options[0].text === 'Goodbye')) {
                 setDialogue(prev => ({
                     ...prev,
                     options: [
                         { text: 'Help me!', action: `ACCEPT_QUEST:${questId}`, actionType: 'QUEST', requiredQuestId: '' },
-                        { text: 'Goodbye', action: 'close', actionType: 'NONE', requiredQuestId: '' }
+                        { text: 'Hand in', action: `CHECK_QUEST:${questId}`, actionType: 'CHECK_QUEST', requiredQuestId: '' },
+                        { text: 'Goodbye!', action: 'close', actionType: 'NONE', requiredQuestId: '' }
                     ]
                 }));
             }
@@ -221,17 +222,45 @@ export default function InteractionGenerator() {
         if (interactionType === 'SHOP') {
             if (!shop.title) initShop();
             // If options are just the single default "Goodbye", upgrade to Shop defaults
-            if (dialogue.options.length === 1 && dialogue.options[0].actionType === 'NONE') {
+            if (dialogue.options.length === 1 && (dialogue.options[0].actionType === 'NONE' || dialogue.options[0].text === 'Goodbye')) {
                 setDialogue(prev => ({
                     ...prev,
                     options: [
                         { text: 'Show me your wares', action: `OPEN_SHOP:${shopId}`, actionType: 'SHOP', requiredQuestId: '' },
-                        { text: 'Goodbye', action: 'close', actionType: 'NONE', requiredQuestId: '' }
+                        { text: 'Goodbye!', action: 'close', actionType: 'NONE', requiredQuestId: '' }
                     ]
                 }));
             }
         }
-    }, [interactionType, npcId]);
+    }, [interactionType]); // Only trigger on type change
+
+    // Sync NPC ID with Actions
+    useEffect(() => {
+        if (!npcId) return;
+
+        const newQuestId = `${npcId.toLowerCase()}_quest`;
+        const newShopId = `${npcId.toLowerCase()}_shop`;
+
+        setDialogue(prev => ({
+            ...prev,
+            options: prev.options.map(opt => {
+                let newAction = opt.action;
+                // If the action looks like a default pattern, update it
+                if (opt.actionType === 'QUEST' && (opt.action.startsWith('ACCEPT_QUEST:') || !opt.action)) {
+                    newAction = `ACCEPT_QUEST:${newQuestId}`;
+                } else if (opt.actionType === 'CHECK_QUEST' && (opt.action.startsWith('CHECK_QUEST:') || !opt.action)) {
+                    newAction = `CHECK_QUEST:${newQuestId}`;
+                } else if (opt.actionType === 'SHOP' && (opt.action.startsWith('OPEN_SHOP:') || !opt.action)) {
+                    newAction = `OPEN_SHOP:${newShopId}`;
+                } else if (opt.actionType === 'HIDE_IF_COMPLETED' && (opt.action.startsWith('HIDE_IF_COMPLETED:') || !opt.action)) {
+                    newAction = `HIDE_IF_COMPLETED:${newQuestId}`;
+                } else if (opt.actionType === 'SHOW_IF_COMPLETED' && (opt.action.startsWith('SHOW_IF_COMPLETED:') || !opt.action)) {
+                    newAction = `SHOW_IF_COMPLETED:${newQuestId}`;
+                }
+                return { ...opt, action: newAction };
+            })
+        }));
+    }, [npcId]);
 
     const handleNpcRoleLoad = (e) => {
         const file = e.target.files[0];
@@ -409,7 +438,8 @@ export default function InteractionGenerator() {
                 ...prev,
                 options: [
                     { text: 'Help me!', action: `ACCEPT_QUEST:${questId}`, actionType: 'QUEST', requiredQuestId: '' },
-                    { text: 'Goodbye', action: 'close', actionType: 'NONE', requiredQuestId: '' }
+                    { text: 'Hand in', action: `CHECK_QUEST:${questId}`, actionType: 'CHECK_QUEST', requiredQuestId: '' },
+                    { text: 'Goodbye!', action: 'close', actionType: 'NONE', requiredQuestId: '' }
                 ]
             }));
             if (!quest.title) initQuest();
@@ -418,14 +448,14 @@ export default function InteractionGenerator() {
                 ...prev,
                 options: [
                     { text: 'Show me your wares', action: `OPEN_SHOP:${shopId}`, actionType: 'SHOP', requiredQuestId: '' },
-                    { text: 'Goodbye', action: 'close', actionType: 'NONE', requiredQuestId: '' }
+                    { text: 'Goodbye!', action: 'close', actionType: 'NONE', requiredQuestId: '' }
                 ]
             }));
             if (!shop.title) initShop();
         } else {
             setDialogue(prev => ({
                 ...prev,
-                options: [{ text: 'Goodbye', action: 'close', actionType: 'NONE', requiredQuestId: '' }]
+                options: [{ text: 'Goodbye!', action: 'close', actionType: 'NONE', requiredQuestId: '' }]
             }));
         }
     };
@@ -747,13 +777,18 @@ export default function InteractionGenerator() {
             )}
 
             {generatorMode === 'LOAD' && !fileLoaded && (
-                <div style={{ marginBottom: '30px', padding: '20px', border: '1px dashed var(--border-color)', borderRadius: '10px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                        <h3 style={{ margin: 0 }}>Step 1: Load NPC Role</h3>
-                        <button onClick={() => setGeneratorMode(null)} style={{ ...btnSmallStyle, opacity: 0.6 }}>Back</button>
+                <div style={stepContainerStyle('var(--accent-blue)')}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                        <h3 style={{ margin: 0, fontSize: '22px', fontWeight: '800', color: 'white', letterSpacing: '-0.02em' }}>Step 1: Load NPC Role</h3>
+                        <button
+                            onClick={() => setGeneratorMode(null)}
+                            style={{ ...btnSmallStyle, height: '32px', padding: '0 12px', fontSize: '12px', opacity: 0.6 }}
+                            onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                            onMouseLeave={e => e.currentTarget.style.opacity = 0.6}
+                        >Back</button>
                     </div>
-                    <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '15px' }}>
-                        Upload the main NPC role file first.
+                    <p style={{ fontSize: '15px', color: 'rgba(255,255,255,0.5)', marginBottom: '25px' }}>
+                        Upload your primary <span style={{ color: 'var(--accent-blue)', fontWeight: '600' }}>Role.json</span> file to get started.
                     </p>
                     <label
                         style={{
@@ -761,16 +796,28 @@ export default function InteractionGenerator() {
                             flexDirection: 'column',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            padding: '30px',
-                            border: '2px dashed var(--accent-blue)',
-                            borderRadius: '12px',
-                            background: 'rgba(0, 150, 255, 0.05)',
+                            padding: '45px',
+                            border: '1px dashed rgba(255, 255, 255, 0.1)',
+                            borderRadius: '16px',
+                            background: 'rgba(255, 255, 255, 0.01)',
                             cursor: 'pointer',
-                            transition: 'all 0.3s',
+                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        }}
+                        onMouseEnter={e => {
+                            e.currentTarget.style.borderColor = 'var(--accent-blue)';
+                            e.currentTarget.style.background = 'rgba(0, 150, 255, 0.03)';
+                            e.currentTarget.style.transform = 'translateY(-2px)';
+                            e.currentTarget.style.boxShadow = '0 10px 30px rgba(0,0,0,0.2)';
+                        }}
+                        onMouseLeave={e => {
+                            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.01)';
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = 'none';
                         }}
                     >
-                        <div style={{ fontSize: '32px', marginBottom: '10px' }}>👤</div>
-                        <span style={{ fontSize: '16px', fontWeight: '600', color: 'var(--accent-blue)' }}>Select NPC Role File</span>
+                        <div style={{ fontSize: '44px', marginBottom: '14px' }}>👤</div>
+                        <span style={{ fontSize: '18px', fontWeight: '600', color: 'var(--accent-blue)' }}>Browse Role File</span>
                         <input
                             type="file"
                             accept=".json"
@@ -783,15 +830,27 @@ export default function InteractionGenerator() {
 
             {fileLoaded && (
                 <div style={{ marginBottom: '30px', padding: '20px', border: '1px solid var(--accent-blue)', borderRadius: '12px', background: 'rgba(0, 150, 255, 0.05)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                        <div style={{ color: 'var(--accent-blue)', fontWeight: 'bold', fontSize: '16px' }}>✓ NPC Configured: {npcId}</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                        <div style={{ color: 'white', fontWeight: '800', fontSize: '22px', display: 'flex', alignItems: 'center', gap: '10px', letterSpacing: '-0.02em' }}>
+                            <span style={{ color: 'var(--accent-blue)', fontSize: '24px' }}>✓</span> NPC Configured: {npcId}
+                        </div>
                         <button
                             onClick={() => {
                                 setFileLoaded(false);
                                 setNpcId('');
                                 if (generatorMode === 'LOAD') setGeneratorMode(null);
                             }}
-                            style={{ ...btnSmallStyle, background: 'rgba(255,0,0,0.2)', border: '1px solid var(--accent-red)', color: 'var(--accent-red)' }}
+                            style={{
+                                ...btnSmallStyle,
+                                background: 'rgba(255, 68, 68, 0.1)',
+                                border: '1px solid rgba(255, 68, 68, 0.2)',
+                                color: '#ff4444',
+                                height: '36px',
+                                padding: '0 16px',
+                                borderRadius: '8px'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255, 68, 68, 0.2)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255, 68, 68, 0.1)'}
                         >Reset</button>
                     </div>
 
@@ -807,12 +866,30 @@ export default function InteractionGenerator() {
                     </div>
 
                     {generatorMode === 'LOAD' && (
-                        <div style={{ marginTop: '15px', padding: '15px', background: 'rgba(0, 255, 0, 0.05)', borderRadius: '8px', border: '1px solid var(--accent-green)' }}>
-                            <div style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>Step 2: Load Interaction (Mandatory for Load)</div>
-                            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '5px' }}>
-                                Load the base <span style={{ color: 'var(--accent-blue)' }}>{npcId}_interactions.json</span> file.
+                        <div style={stepContainerStyle('var(--accent-green)')}>
+                            <div style={{ color: 'white', fontWeight: '800', fontSize: '20px', letterSpacing: '-0.02em' }}>Step 2: Load Interaction</div>
+                            <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.5)', marginTop: '8px', marginBottom: '20px' }}>
+                                Load the base <span style={{ color: 'var(--accent-blue)', fontWeight: '600' }}>{npcId}_interactions.json</span> file.
                             </p>
-                            <label style={{ ...btnSmallStyle, display: 'inline-block', marginTop: '10px', background: interactionLoaded ? 'rgba(0,0,0,0.3)' : 'var(--accent-blue)', borderColor: interactionLoaded ? 'var(--border-color)' : 'var(--accent-blue)' }}>
+                            <label
+                                style={{
+                                    ...btnSmallStyle,
+                                    background: interactionLoaded ? 'rgba(255,255,255,0.05)' : 'var(--accent-blue)',
+                                    borderColor: interactionLoaded ? 'rgba(255,255,255,0.1)' : 'var(--accent-blue)',
+                                    height: '46px',
+                                    padding: '0 24px',
+                                    borderRadius: '12px',
+                                    fontSize: '15px'
+                                }}
+                                onMouseEnter={e => {
+                                    if (!interactionLoaded) e.currentTarget.style.filter = 'brightness(1.2)';
+                                    else e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                                }}
+                                onMouseLeave={e => {
+                                    e.currentTarget.style.filter = 'none';
+                                    if (interactionLoaded) e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                                }}
+                            >
                                 {interactionLoaded ? '✓ Interaction Loaded' : '📂 Select Interaction File'}
                                 <input
                                     type="file"
@@ -824,12 +901,24 @@ export default function InteractionGenerator() {
                         </div>
                     )}
 
-                    <div style={{ marginTop: '15px', padding: '15px', background: 'rgba(0, 150, 255, 0.05)', borderRadius: '8px', border: '1px solid var(--accent-blue)' }}>
-                        <div style={{ color: 'var(--accent-blue)', fontWeight: 'bold' }}>Optional: Load Quest or Shop Data</div>
-                        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '5px' }}>
-                            Import an existing <span style={{ color: 'var(--accent-blue)' }}>quest.json</span> or <span style={{ color: 'var(--accent-blue)' }}>shop.json</span>.
+                    <div style={stepContainerStyle('var(--accent-blue)')}>
+                        <div style={{ color: 'white', fontWeight: '800', fontSize: '20px', letterSpacing: '-0.02em' }}>Optional: Load Quest or Shop Data</div>
+                        <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.5)', marginTop: '8px', marginBottom: '20px' }}>
+                            Import an existing <span style={{ color: 'var(--accent-blue)', fontWeight: '600' }}>quest.json</span> or <span style={{ color: 'var(--accent-blue)', fontWeight: '600' }}>shop.json</span>.
                         </p>
-                        <label style={{ ...btnSmallStyle, display: 'inline-block', marginTop: '10px', background: 'var(--accent-blue)', borderColor: 'var(--accent-blue)' }}>
+                        <label
+                            style={{
+                                ...btnSmallStyle,
+                                background: 'var(--accent-blue)',
+                                borderColor: 'var(--accent-blue)',
+                                height: '46px',
+                                padding: '0 24px',
+                                borderRadius: '12px',
+                                fontSize: '15px'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.2)'}
+                            onMouseLeave={e => e.currentTarget.style.filter = 'none'}
+                        >
                             📂 Select Quest/Shop File
                             <input
                                 type="file"
@@ -939,6 +1028,11 @@ export default function InteractionGenerator() {
                                             key={idx}
                                             draggable
                                             onDragStart={(e) => {
+                                                // Only allow drag if target is the handle
+                                                if (!e.target.dataset.dragHandle) {
+                                                    e.preventDefault();
+                                                    return;
+                                                }
                                                 setDraggedIdx(idx);
                                                 e.dataTransfer.effectAllowed = "move";
                                                 const ghost = e.currentTarget.cloneNode(true);
@@ -986,15 +1080,18 @@ export default function InteractionGenerator() {
                                                 position: 'relative'
                                             }}
                                         >
-                                            <div style={{
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                cursor: 'grab',
-                                                color: '#444',
-                                                fontSize: '18px',
-                                                userSelect: 'none'
-                                            }}>
+                                            <div
+                                                data-drag-handle="true"
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    cursor: 'grab',
+                                                    color: '#444',
+                                                    fontSize: '18px',
+                                                    userSelect: 'none',
+                                                    padding: '5px'
+                                                }}>
                                                 ⣿
                                             </div>
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -1336,44 +1433,59 @@ export default function InteractionGenerator() {
 const inputStyle = {
     width: '100%',
     height: '42px',
-    padding: '0 14px',
-    background: '#1a1a1a',
-    border: '1px solid #333',
-    borderRadius: '8px',
+    padding: '0 16px',
+    background: 'rgba(255, 255, 255, 0.03)',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+    borderRadius: '12px',
     color: '#e0e0e0',
     fontSize: '14px',
-    transition: 'all 0.2s ease',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
     outline: 'none',
     marginTop: '4px',
-    marginBottom: '0', // Removed margin for better grid control
+    marginBottom: '0',
     boxSizing: 'border-box'
 };
 
 const btnSmallStyle = {
-    height: '32px',
-    padding: '0 16px',
-    fontSize: '13px',
-    fontWeight: '500',
-    background: '#2a2a2a',
-    border: '1px solid #444',
+    height: '40px',
+    padding: '0 20px',
+    fontSize: '14px',
+    fontWeight: '600',
+    background: 'linear-gradient(145deg, #2a2a2a, #222)',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
     color: '#fff',
     cursor: 'pointer',
-    borderRadius: '6px',
-    transition: 'all 0.2s ease',
+    borderRadius: '10px',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '6px'
+    gap: '8px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
 };
 
 const deleteBtnStyle = {
     ...btnSmallStyle,
     background: 'rgba(255, 68, 68, 0.1)',
-    border: '1px solid rgba(255, 68, 68, 0.3)',
+    border: '1px solid rgba(255, 68, 68, 0.2)',
     color: '#ff4444',
-    width: '42px', // Match input height
-    height: '42px', // Match input height
+    width: '42px',
+    height: '42px',
     padding: '0',
     fontSize: '18px',
-    marginTop: '4px'
+    marginTop: '4px',
+    borderRadius: '12px'
 };
+
+const stepContainerStyle = (color = 'var(--accent-blue)') => ({
+    marginBottom: '30px',
+    padding: '28px',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+    borderLeft: `4px solid ${color}`,
+    borderRadius: '16px',
+    background: 'rgba(255, 255, 255, 0.02)',
+    backdropFilter: 'blur(12px)',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+    position: 'relative',
+    overflow: 'hidden'
+});
