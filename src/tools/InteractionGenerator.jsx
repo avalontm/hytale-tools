@@ -189,6 +189,8 @@ export default function InteractionGenerator() {
         appearance: '',
         ...DEFAULT_NPC_ROLE_VALUES
     });
+    const [draggedIdx, setDraggedIdx] = useState(null);
+    const [draggedOverIdx, setDraggedOverIdx] = useState(null);
 
     useEffect(() => {
         if (npcId) {
@@ -200,9 +202,36 @@ export default function InteractionGenerator() {
     // Hybrid interactions are now supported, so we no longer reset options
     // when the interaction type changes.
     useEffect(() => {
-        if (interactionType === 'QUEST' && !quest.title) initQuest();
-        if (interactionType === 'SHOP' && !shop.title) initShop();
-    }, [interactionType]);
+        const questId = `${npcId?.toLowerCase() || 'npc'}_quest`;
+        const shopId = `${npcId?.toLowerCase() || 'npc'}_shop`;
+
+        if (interactionType === 'QUEST') {
+            if (!quest.title) initQuest();
+            // If options are just the single default "Goodbye", upgrade to Quest defaults
+            if (dialogue.options.length === 1 && dialogue.options[0].actionType === 'NONE') {
+                setDialogue(prev => ({
+                    ...prev,
+                    options: [
+                        { text: 'Help me!', action: `ACCEPT_QUEST:${questId}`, actionType: 'QUEST', requiredQuestId: '' },
+                        { text: 'Goodbye', action: 'close', actionType: 'NONE', requiredQuestId: '' }
+                    ]
+                }));
+            }
+        }
+        if (interactionType === 'SHOP') {
+            if (!shop.title) initShop();
+            // If options are just the single default "Goodbye", upgrade to Shop defaults
+            if (dialogue.options.length === 1 && dialogue.options[0].actionType === 'NONE') {
+                setDialogue(prev => ({
+                    ...prev,
+                    options: [
+                        { text: 'Show me your wares', action: `OPEN_SHOP:${shopId}`, actionType: 'SHOP', requiredQuestId: '' },
+                        { text: 'Goodbye', action: 'close', actionType: 'NONE', requiredQuestId: '' }
+                    ]
+                }));
+            }
+        }
+    }, [interactionType, npcId]);
 
     const handleNpcRoleLoad = (e) => {
         const file = e.target.files[0];
@@ -349,6 +378,58 @@ export default function InteractionGenerator() {
         reader.readAsText(file);
     };
 
+    const handleInteractionTypeChange = async (newType) => {
+        if (newType === interactionType) return;
+
+        // Check if there is meaningful data in options
+        const hasData = dialogue.options.length > 1 ||
+            (dialogue.options[0] && (
+                (dialogue.options[0].text && dialogue.options[0].text !== 'Goodbye') ||
+                dialogue.options[0].actionType !== 'NONE' ||
+                dialogue.options[0].requiredQuestId
+            ));
+
+        if (hasData) {
+            const confirmed = await showConfirm(
+                'Changing the interaction type will reset your current options. Are you sure?',
+                'Switch Interaction Type',
+                { isDestructive: true, confirmText: 'Reset and Switch' }
+            );
+            if (!confirmed) return;
+        }
+
+        setInteractionType(newType);
+
+        // Reset options based on new type
+        const questId = `${npcId.toLowerCase()}_quest`;
+        const shopId = `${npcId.toLowerCase()}_shop`;
+
+        if (newType === 'QUEST') {
+            setDialogue(prev => ({
+                ...prev,
+                options: [
+                    { text: 'Help me!', action: `ACCEPT_QUEST:${questId}`, actionType: 'QUEST', requiredQuestId: '' },
+                    { text: 'Goodbye', action: 'close', actionType: 'NONE', requiredQuestId: '' }
+                ]
+            }));
+            if (!quest.title) initQuest();
+        } else if (newType === 'SHOP') {
+            setDialogue(prev => ({
+                ...prev,
+                options: [
+                    { text: 'Show me your wares', action: `OPEN_SHOP:${shopId}`, actionType: 'SHOP', requiredQuestId: '' },
+                    { text: 'Goodbye', action: 'close', actionType: 'NONE', requiredQuestId: '' }
+                ]
+            }));
+            if (!shop.title) initShop();
+        } else {
+            setDialogue(prev => ({
+                ...prev,
+                options: [{ text: 'Goodbye', action: 'close', actionType: 'NONE', requiredQuestId: '' }]
+            }));
+        }
+    };
+
     const addOption = () => {
         setDialogue(prev => ({
             ...prev,
@@ -475,8 +556,9 @@ export default function InteractionGenerator() {
 
         // Generate Updated Role JSON using shared utility
         const roleData = createNpcRole({
+            ...roleConfig,
             id: npcId,
-            ...roleConfig
+            displayName: npcId // Use the Internal ID as the NameTranslationKey
         });
 
         // Add Role to ZIP
@@ -633,7 +715,7 @@ export default function InteractionGenerator() {
                         <h3 style={{ margin: 0 }}>Step 1: NPC Basics</h3>
                         <button onClick={() => setGeneratorMode(null)} style={{ ...btnSmallStyle, opacity: 0.6 }}>Back</button>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '20px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
                         <div>
                             <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Internal NPC ID</label>
                             <input
@@ -641,15 +723,6 @@ export default function InteractionGenerator() {
                                 onChange={e => setNpcId(sanitizeItemId(e.target.value))}
                                 style={{ ...inputStyle, marginBottom: 0, marginTop: '5px' }}
                                 placeholder="e.g. guard_captain"
-                            />
-                        </div>
-                        <div>
-                            <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Display Name</label>
-                            <input
-                                value={roleConfig.displayName}
-                                onChange={e => setRoleConfig({ ...roleConfig, displayName: e.target.value })}
-                                style={{ ...inputStyle, marginBottom: 0, marginTop: '5px' }}
-                                placeholder="e.g. Guard Captain"
                             />
                         </div>
                         <div>
@@ -722,14 +795,10 @@ export default function InteractionGenerator() {
                         >Reset</button>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '15px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
                         <div>
                             <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Internal ID</label>
                             <input value={npcId} disabled style={{ ...inputStyle, opacity: 0.6, marginBottom: 0 }} />
-                        </div>
-                        <div>
-                            <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Display Name</label>
-                            <input value={roleConfig.displayName} disabled style={{ ...inputStyle, opacity: 0.6, marginBottom: 0 }} />
                         </div>
                         <div>
                             <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Appearance</label>
@@ -788,7 +857,7 @@ export default function InteractionGenerator() {
                             ].map(opt => (
                                 <div
                                     key={opt.id}
-                                    onClick={() => setInteractionType(opt.id)}
+                                    onClick={() => handleInteractionTypeChange(opt.id)}
                                     style={{
                                         cursor: 'pointer',
                                         padding: '20px',
@@ -826,7 +895,7 @@ export default function InteractionGenerator() {
                         </p>
                         <div style={{ display: 'grid', gap: '15px' }}>
                             <div>
-                                <label>Title</label>
+                                <label>Title (DisplayName & Window Title)</label>
                                 <input
                                     type="text"
                                     value={dialogue.title}
@@ -842,27 +911,92 @@ export default function InteractionGenerator() {
                                     style={{ ...inputStyle, minHeight: '80px', padding: '12px 14px', lineHeight: '1.5' }}
                                 />
                             </div>
-                            <div>
-                                <label>Completed Text (After Quest)</label>
-                                <textarea
-                                    value={dialogue.completedText}
-                                    onChange={e => setDialogue({ ...dialogue, completedText: e.target.value })}
-                                    style={{ ...inputStyle, minHeight: '60px', padding: '12px 14px', lineHeight: '1.5' }}
-                                    placeholder="Text to show when the player has finished the quest..."
-                                />
-                            </div>
+                            {interactionType === 'QUEST' && (
+                                <div>
+                                    <label>Completed Text (After Quest)</label>
+                                    <textarea
+                                        value={dialogue.completedText}
+                                        onChange={e => setDialogue({ ...dialogue, completedText: e.target.value })}
+                                        style={{ ...inputStyle, minHeight: '60px', padding: '12px 14px', lineHeight: '1.5' }}
+                                        placeholder="Text to show when the player has finished the quest..."
+                                    />
+                                </div>
+                            )}
 
                             <div>
                                 <label>Player Options</label>
                                 <div style={{ marginBottom: '10px' }}>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 2fr 45px', gap: '10px', marginBottom: '5px', fontSize: '11px', color: '#888', fontWeight: 'bold' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '30px 1.5fr 1fr 2fr 1.5fr 45px', gap: '10px', marginBottom: '5px', fontSize: '11px', color: '#888', fontWeight: 'bold' }}>
+                                        <div></div>
                                         <div>BUTTON TEXT</div>
                                         <div>ACTION TYPE</div>
                                         <div>TARGET ACTION</div>
+                                        <div>CONDITION</div>
                                         <div></div>
                                     </div>
                                     {dialogue.options.map((opt, idx) => (
-                                        <div key={idx} style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 1.5fr) minmax(130px, 1fr) minmax(200px, 2fr) minmax(150px, 1.5fr) 45px', gap: '10px', marginBottom: '10px' }}>
+                                        <div
+                                            key={idx}
+                                            draggable
+                                            onDragStart={(e) => {
+                                                setDraggedIdx(idx);
+                                                e.dataTransfer.effectAllowed = "move";
+                                                const ghost = e.currentTarget.cloneNode(true);
+                                                ghost.style.width = "200px";
+                                                ghost.style.position = "absolute";
+                                                ghost.style.top = "-1000px";
+                                                document.body.appendChild(ghost);
+                                                e.dataTransfer.setDragImage(ghost, 0, 0);
+                                                setTimeout(() => document.body.removeChild(ghost), 0);
+                                            }}
+                                            onDragEnd={() => {
+                                                setDraggedIdx(null);
+                                                setDraggedOverIdx(null);
+                                            }}
+                                            onDragEnter={(e) => {
+                                                e.preventDefault();
+                                                setDraggedOverIdx(idx);
+                                            }}
+                                            onDragOver={(e) => {
+                                                e.preventDefault();
+                                                setDraggedOverIdx(idx);
+                                            }}
+                                            onDrop={(e) => {
+                                                e.preventDefault();
+                                                if (draggedIdx === null || draggedIdx === idx) return;
+
+                                                const newOptions = [...dialogue.options];
+                                                const [movedItem] = newOptions.splice(draggedIdx, 1);
+                                                newOptions.splice(idx, 0, movedItem);
+
+                                                setDialogue(prev => ({ ...prev, options: newOptions }));
+                                                setDraggedIdx(null);
+                                                setDraggedOverIdx(null);
+                                            }}
+                                            style={{
+                                                display: 'grid',
+                                                gridTemplateColumns: '30px minmax(150px, 1.5fr) minmax(130px, 1fr) minmax(200px, 2fr) minmax(150px, 1.5fr) 45px',
+                                                gap: '10px',
+                                                marginBottom: '10px',
+                                                padding: '10px',
+                                                background: draggedIdx === idx ? 'rgba(255,255,255,0.02)' : (draggedOverIdx === idx ? 'rgba(0, 150, 255, 0.1)' : 'transparent'),
+                                                border: draggedOverIdx === idx ? '1px solid var(--accent-blue)' : '1px solid transparent',
+                                                borderRadius: '8px',
+                                                transition: 'all 0.2s ease',
+                                                position: 'relative'
+                                            }}
+                                        >
+                                            <div style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                cursor: 'grab',
+                                                color: '#444',
+                                                fontSize: '18px',
+                                                userSelect: 'none'
+                                            }}>
+                                                ⣿
+                                            </div>
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                                 <small style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Button Text</small>
                                                 <input
