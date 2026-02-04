@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useDialog } from '../contexts/DialogContext';
 import JSZip from 'jszip';
-import { createNpcRole, DEFAULT_NPC_ROLE_VALUES } from '../utils/hytaleFormat';
+import { createNpcRole, DEFAULT_NPC_ROLE_VALUES, stripHytalePrefix, sanitizeItemId } from '../utils/hytaleFormat';
 
 
 
@@ -33,18 +33,19 @@ const ItemSearchInput = ({ value, onChange, placeholder, availableItems, inputSt
     }, [searchTerm, availableItems]);
 
     return (
-        <div style={{ position: 'relative', flex: 2 }} onClick={e => e.stopPropagation()}>
-            <div style={{ position: 'relative' }}>
+        <div style={{ position: 'relative', width: '100%', height: '100%' }} onClick={e => e.stopPropagation()}>
+            <div style={{ position: 'relative', width: '100%', height: '100%' }}>
                 <input
                     placeholder={placeholder || "🔍 Search item ID..."}
                     value={searchTerm}
                     onChange={e => {
-                        setSearchTerm(e.target.value);
+                        const sanitized = sanitizeItemId(e.target.value);
+                        setSearchTerm(sanitized);
                         setIsOpen(true);
-                        onChange(e.target.value);
+                        onChange(sanitized);
                     }}
                     onFocus={() => setIsOpen(true)}
-                    style={{ ...inputStyle, marginBottom: 0, paddingLeft: '35px' }}
+                    style={{ ...inputStyle, marginBottom: 0, paddingLeft: '35px', height: '100%' }}
                 />
                 <span style={{
                     position: 'absolute',
@@ -64,8 +65,8 @@ const ItemSearchInput = ({ value, onChange, placeholder, availableItems, inputSt
                     right: 0,
                     maxHeight: '250px',
                     overflowY: 'auto',
-                    background: '#1a2635',
-                    border: '1px solid var(--accent-blue)',
+                    background: '#0d1117',
+                    border: '1px solid #30363d',
                     borderRadius: '8px',
                     zIndex: 9999,
                     boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
@@ -124,22 +125,57 @@ const ItemSearchInput = ({ value, onChange, placeholder, availableItems, inputSt
     );
 };
 
+const ToggleSwitch = ({ label, checked, onChange, id }) => {
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 0 }}>{label}</label>
+            <div
+                onClick={() => onChange(!checked)}
+                style={{
+                    width: '50px',
+                    height: '26px',
+                    background: checked ? 'var(--accent-blue)' : '#333',
+                    borderRadius: '13px',
+                    position: 'relative',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    boxShadow: checked ? '0 0 10px rgba(0, 150, 255, 0.3)' : 'none',
+                    marginTop: '4px'
+                }}
+            >
+                <div style={{
+                    position: 'absolute',
+                    top: '3px',
+                    left: checked ? '27px' : '3px',
+                    width: '20px',
+                    height: '20px',
+                    background: 'white',
+                    borderRadius: '50%',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                }} />
+            </div>
+        </div>
+    );
+};
+
 export default function InteractionGenerator() {
     const { showAlert, showConfirm } = useDialog();
     const [npcId, setNpcId] = useState('');
+    const [generatorMode, setGeneratorMode] = useState(null); // 'LOAD', 'NEW', or null
     const [fileLoaded, setFileLoaded] = useState(false);
     const [interactionLoaded, setInteractionLoaded] = useState(false);
     const [dialogue, setDialogue] = useState({
         title: '',
-        text: '',
-        completedText: '', // New field
-        options: []
+        text: 'Hello!',
+        completedText: '',
+        options: [{ text: 'Goodbye', action: 'close', actionType: 'NONE', requiredQuestId: '' }]
     });
     const [interactionType, setInteractionType] = useState('QUEST'); // 'QUEST', 'SHOP', 'DIALOG_ONLY'
     const [quest, setQuest] = useState({
         title: '',
         description: 'Help me collect some items.',
-        completionMessage: 'Thank you! Here is your reward.',
+        requiredQuestId: '', // For quest chains
         objectives: [],
         rewards: []
     });
@@ -160,6 +196,13 @@ export default function InteractionGenerator() {
             setShop(prev => ({ ...prev, title: `${npcId}'s Shop` }));
         }
     }, [npcId]);
+
+    // Hybrid interactions are now supported, so we no longer reset options
+    // when the interaction type changes.
+    useEffect(() => {
+        if (interactionType === 'QUEST' && !quest.title) initQuest();
+        if (interactionType === 'SHOP' && !shop.title) initShop();
+    }, [interactionType]);
 
     const handleNpcRoleLoad = (e) => {
         const file = e.target.files[0];
@@ -210,16 +253,19 @@ export default function InteractionGenerator() {
         reader.onload = (event) => {
             try {
                 const json = JSON.parse(event.target.result);
-                const keys = Object.keys(json);
-                if (keys.length === 0) return;
+                let data = json;
+                let id = file.name.replace('.json', '');
 
-                const firstKey = keys[0];
-                const data = json[firstKey];
+                // Support both flat and nested JSON
+                if (!json.type && !json.options && Object.keys(json).length === 1) {
+                    id = Object.keys(json)[0];
+                    data = json[id];
+                }
 
-                // Check specifically for Interaction file first
-                if (data.type === 'DIALOG') {
+                // Check specifically for Interaction file
+                if (data.type === 'DIALOG' || data.type === 'QUEST' || data.type === 'SHOP') {
                     setDialogue({
-                        title: data.title || firstKey,
+                        title: data.title || id,
                         text: data.text || '',
                         completedText: data.completedText || '',
                         options: (data.options || []).map(opt => {
@@ -230,24 +276,25 @@ export default function InteractionGenerator() {
                                 else if (opt.action.startsWith('HIDE_IF_COMPLETED')) actionType = 'HIDE_IF_COMPLETED';
                                 else if (opt.action.startsWith('SHOW_IF_COMPLETED')) actionType = 'SHOW_IF_COMPLETED';
                                 else if (opt.action.startsWith('OPEN_SHOP')) actionType = 'SHOP';
+                                else if (opt.action === 'close') actionType = 'NONE';
                             }
-                            return { ...opt, actionType };
+                            return { ...opt, actionType, requiredQuestId: opt.requiredQuestId || '' };
                         })
                     });
 
-                    // Explicitly detect type based on ID presence
-                    if (data.questId) {
+                    // Detect interaction type
+                    if (data.type === 'QUEST' || data.questId) {
                         setInteractionType('QUEST');
-                    } else if (data.shopId) {
+                    } else if (data.type === 'SHOP' || data.shopId) {
                         setInteractionType('SHOP');
                     } else {
-                        setInteractionType('DIALOG_ONLY');
+                        setInteractionType('DIALOG_ONLY'); // Keep as fallback
                     }
 
                     setInteractionLoaded(true);
-                    showAlert(`Loaded Interaction: ${firstKey}`, 'Success');
+                    showAlert(`Loaded Interaction: ${id}`, 'Success');
                 } else {
-                    showAlert('Please upload a valid Interaction file (DIALOG) for Step 2.', 'Warning');
+                    showAlert('Please upload a valid Interaction file.', 'Warning');
                 }
             } catch (err) {
                 showAlert('Invalid JSON file', 'Error');
@@ -264,39 +311,34 @@ export default function InteractionGenerator() {
         reader.onload = (event) => {
             try {
                 const json = JSON.parse(event.target.result);
-                const keys = Object.keys(json);
-                if (keys.length === 0) return;
+                let data = json;
+                let id = file.name.replace('.json', '');
 
-                const firstKey = keys[0];
-                const data = json[firstKey];
+                if (!json.title && Object.keys(json).length === 1) {
+                    id = Object.keys(json)[0];
+                    data = json[id];
+                }
 
-                // 2. Check if it's a Quest file
-                if (data.objectives) {
+                if (interactionType === 'QUEST') {
                     setQuest({
                         title: data.title || '',
                         description: data.description || '',
-                        completionMessage: data.completionMessage || '',
-                        objectives: data.objectives || [],
-                        rewards: data.rewards || []
+                        requiredQuestId: data.requiredQuestId || '',
+                        objectives: (data.objectives || []).map(o => ({ ...o, amount: o.amount || 1 })),
+                        rewards: (data.rewards || []).map(r => ({ ...r, amount: r.amount || 1 }))
                     });
-                    setInteractionType('QUEST');
-                    showAlert(`Loaded Quest data`, 'Success');
-                }
-                // 3. Check if it's a Shop file
-                else if (data.items && data.type) {
+                    showAlert(`Loaded Quest: ${id}`, 'Success');
+                } else if (interactionType === 'SHOP') {
                     setShop({
                         title: data.title || '',
-                        type: data.type || 'buy',
-                        items: (data.items || []).map(item => ({
-                            id: item.id || '',
-                            name: item.name || item.id || '',
-                            amount: item.amount || 1,
-                            buyPrice: item.buyPrice || 0,
-                            sellPrice: item.sellPrice || 0
+                        items: (data.items || []).map(i => ({
+                            id: i.itemId || i.id || '',
+                            amount: i.amount || 1,
+                            buyPrice: i.buyPrice || 0,
+                            sellPrice: i.sellPrice || 0
                         }))
                     });
-                    setInteractionType('SHOP');
-                    showAlert(`Loaded Shop data`, 'Success');
+                    showAlert(`Loaded Shop: ${id}`, 'Success');
                 } else {
                     showAlert('Please upload a valid Quest or Shop file for Step 3.', 'Warning');
                 }
@@ -310,7 +352,7 @@ export default function InteractionGenerator() {
     const addOption = () => {
         setDialogue(prev => ({
             ...prev,
-            options: [...prev.options, { text: '', actionType: 'NONE' }]
+            options: [...prev.options, { text: '', action: 'close', actionType: 'NONE', requiredQuestId: '' }]
         }));
     };
 
@@ -319,27 +361,29 @@ export default function InteractionGenerator() {
         newOptions[index][field] = value;
 
         // Auto-configure action string based on type
-        // Auto-configure action string based on type
         if (field === 'actionType') {
             const questId = `${npcId.toLowerCase()}_quest`;
+            const shopId = `${npcId.toLowerCase()}_shop`;
 
             if (value === 'QUEST') {
-                if (!quest) initQuest();
+                if (!quest.title) initQuest();
                 newOptions[index].action = `ACCEPT_QUEST:${questId}`;
             } else if (value === 'CHECK_QUEST') {
-                if (!quest) initQuest();
+                if (!quest.title) initQuest();
                 newOptions[index].action = `CHECK_QUEST:${questId}`;
+            } else if (value === 'SHOP') {
+                if (!shop.title) initShop();
+                newOptions[index].action = `OPEN_SHOP:${shopId}`;
             } else if (value === 'HIDE_IF_COMPLETED') {
-                if (!quest) initQuest();
+                if (!quest.title) initQuest();
                 newOptions[index].action = `HIDE_IF_COMPLETED:${questId}`;
             } else if (value === 'SHOW_IF_COMPLETED') {
-                if (!quest) initQuest();
+                if (!quest.title) initQuest();
                 newOptions[index].action = `SHOW_IF_COMPLETED:${questId}`;
-            } else if (value === 'SHOP') {
-                if (!shop) initShop();
-                newOptions[index].action = `OPEN_SHOP:${npcId.toLowerCase()}_shop`;
+            } else if (value === 'DIALOG') {
+                newOptions[index].action = 'DIALOG';
             } else {
-                newOptions[index].action = 'CLOSE_DIALOG';
+                newOptions[index].action = 'close';
             }
         }
 
@@ -350,7 +394,6 @@ export default function InteractionGenerator() {
         setQuest({
             title: `${npcId}'s Quest`,
             description: 'Help me collect some items.',
-            completionMessage: 'Thank you! Here is your reward.', // New field
             objectives: [],
             rewards: []
         });
@@ -402,39 +445,35 @@ export default function InteractionGenerator() {
         const sId = `${npcId.toLowerCase()}_shop`;
 
         const interactionData = {
-            [interactionId]: {
-                type: "DIALOG",
-                title: dialogue.title,
-                text: dialogue.text,
-                ...(interactionType === 'QUEST' && { completedText: dialogue.completedText }),
-                options: dialogue.options.map(opt => {
-                    let action = opt.action;
-                    // Auto-correct actions to match current NPC IDs
-                    if (interactionType === 'QUEST' && action) {
-                        if (action.startsWith('ACCEPT_QUEST:')) action = `ACCEPT_QUEST:${qId}`;
-                        else if (action.startsWith('CHECK_QUEST:')) action = `CHECK_QUEST:${qId}`;
-                        else if (action.startsWith('HIDE_IF_COMPLETED:')) action = `HIDE_IF_COMPLETED:${qId}`;
-                        else if (action.startsWith('SHOW_IF_COMPLETED:')) action = `SHOW_IF_COMPLETED:${qId}`;
-                    } else if (interactionType === 'SHOP' && action && action.startsWith('OPEN_SHOP:')) {
-                        action = `OPEN_SHOP:${sId}`;
-                    }
-                    return {
-                        text: opt.text,
-                        action: action
-                    };
-                })
-            }
+            title: dialogue.title,
+            text: dialogue.text,
+            completedText: dialogue.completedText || "",
+            type: interactionType === 'DIALOG_ONLY' ? 'DIALOG' : interactionType,
+            options: dialogue.options.map(opt => {
+                let action = opt.action;
+                // No more auto-overwriting manual edits, just ensure consistency for empty/fresh ones
+                if (!action || action === 'close') {
+                    if (opt.actionType === 'QUEST') action = `ACCEPT_QUEST:${qId}`;
+                    else if (opt.actionType === 'CHECK_QUEST') action = `CHECK_QUEST:${qId}`;
+                    else if (opt.actionType === 'SHOP') action = `OPEN_SHOP:${sId}`;
+                    else if (opt.actionType === 'HIDE_IF_COMPLETED') action = `HIDE_IF_COMPLETED:${qId}`;
+                    else if (opt.actionType === 'SHOW_IF_COMPLETED') action = `SHOW_IF_COMPLETED:${qId}`;
+                    else if (opt.actionType === 'DIALOG') action = 'DIALOG';
+                    else action = 'close';
+                }
+                return {
+                    text: opt.text,
+                    action: action,
+                    requiredQuestId: opt.requiredQuestId ? stripHytalePrefix(opt.requiredQuestId) : undefined
+                };
+            })
         };
 
-        // Add quest/shop linkage fields ONLY if matches selected type
-        if (interactionType === 'QUEST') {
-            const qId = `${npcId.toLowerCase()}_quest`;
-            interactionData[interactionId].questId = qId;
-        } else if (interactionType === 'SHOP') {
-            interactionData[interactionId].shopId = `${npcId.toLowerCase()}_shop`;
-        }
+        // Flat Interaction JSON (as per new documentation)
+        const interactionFileName = `${npcId}_interactions.json`;
+        npcFolder.folder("Interactions").file(interactionFileName, JSON.stringify(interactionData, null, 4));
 
-        // 1b. Generate Updated Role JSON using shared utility
+        // Generate Updated Role JSON using shared utility
         const roleData = createNpcRole({
             id: npcId,
             ...roleConfig
@@ -443,20 +482,22 @@ export default function InteractionGenerator() {
         // Add Role to ZIP
         npcFolder.folder("Roles").file(`${npcId}.json`, JSON.stringify(roleData, null, 4));
 
-        npcFolder.folder("Interactions").file(`${npcId}_interactions.json`, JSON.stringify(interactionData, null, 4));
-
         // 2. Generate Quest JSON
         if (interactionType === 'QUEST' && quest) {
             const qId = `${npcId.toLowerCase()}_quest`;
             const questData = {
-                [qId]: {
-                    title: quest.title,
-                    description: quest.description,
-                    completionMessage: quest.completionMessage,
-                    repeatable: false,
-                    objectives: quest.objectives,
-                    rewards: quest.rewards
-                }
+                id: qId,
+                title: quest.title,
+                description: quest.description,
+                requiredQuestId: quest.requiredQuestId || undefined,
+                objectives: quest.objectives.map(obj => ({
+                    ...obj,
+                    target: stripHytalePrefix(obj.target)
+                })),
+                rewards: quest.rewards.map(rew => ({
+                    ...rew,
+                    id: rew.type === 'ITEM' ? stripHytalePrefix(rew.id) : rew.id
+                }))
             };
             npcFolder.folder("Quests").file(`${qId}.json`, JSON.stringify(questData, null, 4));
         }
@@ -467,8 +508,7 @@ export default function InteractionGenerator() {
 
             const formattedItems = shop.items.map(item => {
                 const flatItem = {
-                    id: item.id,
-                    name: item.name || item.id,
+                    itemId: stripHytalePrefix(item.id || item.itemId),
                     amount: item.amount || 1
                 };
 
@@ -484,12 +524,9 @@ export default function InteractionGenerator() {
             });
 
             const shopData = {
-                [sId]: {
-                    id: sId,
-                    title: shop.title,
-                    type: shop.type,
-                    items: formattedItems
-                }
+                id: sId,
+                title: shop.title,
+                items: formattedItems
             };
             npcFolder.folder("Shops").file(`${sId}.json`, JSON.stringify(shopData, null, 4));
         }
@@ -522,80 +559,187 @@ export default function InteractionGenerator() {
                 Create Dialogues, Quests, and Shops for an existing NPC.
             </p>
 
-            {/* Step 1: Load NPC */}
-            <div style={{ marginBottom: '30px', padding: '20px', border: '1px dashed var(--border-color)', borderRadius: '10px' }}>
-                <h3 style={{ marginTop: 0 }}>Step 1: Load NPC Role</h3>
-                <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '15px' }}>
-                    Upload the main NPC role file first.
-                </p>
-                <label
-                    style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: '30px',
-                        border: '2px dashed var(--accent-blue)',
-                        borderRadius: '12px',
-                        background: 'rgba(0, 150, 255, 0.05)',
-                        cursor: 'pointer',
-                        transition: 'all 0.3s',
-                    }}
-                >
-                    <div style={{ fontSize: '32px', marginBottom: '10px' }}>👤</div>
-                    <span style={{ fontSize: '16px', fontWeight: '600', color: 'var(--accent-blue)' }}>{fileLoaded ? 'NPC Role Loaded' : 'Select NPC Role File'}</span>
-                    <input
-                        type="file"
-                        accept=".json"
-                        onChange={handleNpcRoleLoad}
-                        style={{ display: 'none' }}
-                    />
-                </label>
-
-                {fileLoaded && (
-                    <div style={{ marginTop: '20px', padding: '15px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '12px', border: '1px solid var(--accent-blue)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                            <div style={{ color: 'var(--accent-blue)', fontWeight: 'bold', fontSize: '16px' }}>✓ NPC Role: {npcId}.json</div>
-                            <button
-                                onClick={() => {
-                                    setFileLoaded(false);
-                                    setNpcId('');
-                                }}
-                                style={{ ...btnSmallStyle, background: 'rgba(255,0,0,0.2)', border: '1px solid var(--accent-red)', color: 'var(--accent-red)' }}
-                            >Reset</button>
+            {!generatorMode && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '40px', maxWidth: '900px', margin: '0 auto 40px auto' }}>
+                    <div
+                        onClick={() => setGeneratorMode('NEW')}
+                        style={{
+                            padding: '40px 30px',
+                            border: '1px solid #333',
+                            borderRadius: '16px',
+                            background: 'linear-gradient(145deg, #1e1e1e, #141414)',
+                            cursor: 'pointer',
+                            textAlign: 'center',
+                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                            position: 'relative',
+                            overflow: 'hidden'
+                        }}
+                        onMouseEnter={e => {
+                            e.currentTarget.style.borderColor = 'var(--accent-blue)';
+                            e.currentTarget.style.transform = 'translateY(-5px)';
+                            e.currentTarget.style.boxShadow = '0 10px 30px rgba(0, 150, 255, 0.2)';
+                        }}
+                        onMouseLeave={e => {
+                            e.currentTarget.style.borderColor = '#333';
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)';
+                        }}
+                    >
+                        <div style={{ height: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
+                            <img src="/static/images/GameModeIconCreative.png" alt="New" style={{ height: '80px', filter: 'drop-shadow(0 0 10px rgba(0,150,255,0.4))' }} />
                         </div>
+                        <h3 style={{ margin: '0 0 10px 0', fontSize: '20px', color: 'white' }}>New Configuration</h3>
+                        <p style={{ fontSize: '14px', color: '#888', margin: 0, lineHeight: '1.4' }}>Start from scratch to create a brand new NPC interaction set.</p>
+                    </div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '15px', padding: '15px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
-                            <div>
-                                <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>File Name / NPC ID</label>
-                                <input
-                                    value={npcId}
-                                    onChange={e => setNpcId(e.target.value.toLowerCase().replace(/\s+/g, '_'))}
-                                    style={{ ...inputStyle, marginBottom: 0, marginTop: '5px', borderColor: 'var(--accent-blue)', fontWeight: 'bold' }}
-                                    placeholder="e.g. bartender"
-                                />
-                                <small style={{ color: 'rgba(0, 150, 255, 0.5)', fontSize: '9px' }}>Determines all filenames</small>
-                            </div>
-                            <div>
-                                <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>NameTranslationKey</label>
-                                <input
-                                    value={roleConfig.displayName}
-                                    onChange={e => setRoleConfig({ ...roleConfig, displayName: e.target.value })}
-                                    style={{ ...inputStyle, marginBottom: 0, marginTop: '5px' }}
-                                />
-                            </div>
-                            <div>
-                                <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Appearance (Model ID)</label>
-                                <input
-                                    value={roleConfig.appearance}
-                                    onChange={e => setRoleConfig({ ...roleConfig, appearance: e.target.value })}
-                                    style={{ ...inputStyle, marginBottom: 0, marginTop: '5px' }}
-                                />
-                            </div>
+                    <div
+                        onClick={() => setGeneratorMode('LOAD')}
+                        style={{
+                            padding: '40px 30px',
+                            border: '1px solid #333',
+                            borderRadius: '16px',
+                            background: 'linear-gradient(145deg, #1e1e1e, #141414)',
+                            cursor: 'pointer',
+                            textAlign: 'center',
+                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                            position: 'relative',
+                            overflow: 'hidden'
+                        }}
+                        onMouseEnter={e => {
+                            e.currentTarget.style.borderColor = 'var(--accent-green)';
+                            e.currentTarget.style.transform = 'translateY(-5px)';
+                            e.currentTarget.style.boxShadow = '0 10px 30px rgba(0, 255, 150, 0.15)';
+                        }}
+                        onMouseLeave={e => {
+                            e.currentTarget.style.borderColor = '#333';
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)';
+                        }}
+                    >
+                        <div style={{ height: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
+                            <img src="/static/images/GameModeIconAdventure.png" alt="Load" style={{ height: '80px', filter: 'drop-shadow(0 0 10px rgba(0,255,150,0.3))' }} />
                         </div>
+                        <h3 style={{ margin: '0 0 10px 0', fontSize: '20px', color: 'white' }}>Load Existing</h3>
+                        <p style={{ fontSize: '14px', color: '#888', margin: 0, lineHeight: '1.4' }}>Upload an NPC Role file to modify its existing interactions.</p>
+                    </div>
+                </div>
+            )}
 
-                        <div style={{ padding: '15px', background: 'rgba(0, 255, 0, 0.05)', borderRadius: '8px', border: '1px solid var(--accent-green)' }}>
-                            <div style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>Step 2: Load Interaction (Mandatory)</div>
+            {generatorMode === 'NEW' && !fileLoaded && (
+                <div style={{ marginBottom: '30px', padding: '30px', border: '1px solid var(--accent-blue)', borderRadius: '12px', background: 'rgba(0, 150, 255, 0.05)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                        <h3 style={{ margin: 0 }}>Step 1: NPC Basics</h3>
+                        <button onClick={() => setGeneratorMode(null)} style={{ ...btnSmallStyle, opacity: 0.6 }}>Back</button>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '20px' }}>
+                        <div>
+                            <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Internal NPC ID</label>
+                            <input
+                                value={npcId}
+                                onChange={e => setNpcId(sanitizeItemId(e.target.value))}
+                                style={{ ...inputStyle, marginBottom: 0, marginTop: '5px' }}
+                                placeholder="e.g. guard_captain"
+                            />
+                        </div>
+                        <div>
+                            <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Display Name</label>
+                            <input
+                                value={roleConfig.displayName}
+                                onChange={e => setRoleConfig({ ...roleConfig, displayName: e.target.value })}
+                                style={{ ...inputStyle, marginBottom: 0, marginTop: '5px' }}
+                                placeholder="e.g. Guard Captain"
+                            />
+                        </div>
+                        <div>
+                            <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Appearance (Model)</label>
+                            <input
+                                value={roleConfig.appearance}
+                                onChange={e => setRoleConfig({ ...roleConfig, appearance: e.target.value })}
+                                style={{ ...inputStyle, marginBottom: 0, marginTop: '5px' }}
+                                placeholder="e.g. Human"
+                            />
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => {
+                            if (!npcId) return showAlert('Please enter an NPC ID', 'Warning');
+                            setFileLoaded(true);
+                        }}
+                        className="btn-primary"
+                        style={{ width: '100%', padding: '16px', fontSize: '15px', fontWeight: '600' }}
+                    >Start Generating</button>
+                </div>
+            )}
+
+            {generatorMode === 'LOAD' && !fileLoaded && (
+                <div style={{ marginBottom: '30px', padding: '20px', border: '1px dashed var(--border-color)', borderRadius: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                        <h3 style={{ margin: 0 }}>Step 1: Load NPC Role</h3>
+                        <button onClick={() => setGeneratorMode(null)} style={{ ...btnSmallStyle, opacity: 0.6 }}>Back</button>
+                    </div>
+                    <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '15px' }}>
+                        Upload the main NPC role file first.
+                    </p>
+                    <label
+                        style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: '30px',
+                            border: '2px dashed var(--accent-blue)',
+                            borderRadius: '12px',
+                            background: 'rgba(0, 150, 255, 0.05)',
+                            cursor: 'pointer',
+                            transition: 'all 0.3s',
+                        }}
+                    >
+                        <div style={{ fontSize: '32px', marginBottom: '10px' }}>👤</div>
+                        <span style={{ fontSize: '16px', fontWeight: '600', color: 'var(--accent-blue)' }}>Select NPC Role File</span>
+                        <input
+                            type="file"
+                            accept=".json"
+                            onChange={handleNpcRoleLoad}
+                            style={{ display: 'none' }}
+                        />
+                    </label>
+                </div>
+            )}
+
+            {fileLoaded && (
+                <div style={{ marginBottom: '30px', padding: '20px', border: '1px solid var(--accent-blue)', borderRadius: '12px', background: 'rgba(0, 150, 255, 0.05)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                        <div style={{ color: 'var(--accent-blue)', fontWeight: 'bold', fontSize: '16px' }}>✓ NPC Configured: {npcId}</div>
+                        <button
+                            onClick={() => {
+                                setFileLoaded(false);
+                                setNpcId('');
+                                if (generatorMode === 'LOAD') setGeneratorMode(null);
+                            }}
+                            style={{ ...btnSmallStyle, background: 'rgba(255,0,0,0.2)', border: '1px solid var(--accent-red)', color: 'var(--accent-red)' }}
+                        >Reset</button>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '15px' }}>
+                        <div>
+                            <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Internal ID</label>
+                            <input value={npcId} disabled style={{ ...inputStyle, opacity: 0.6, marginBottom: 0 }} />
+                        </div>
+                        <div>
+                            <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Display Name</label>
+                            <input value={roleConfig.displayName} disabled style={{ ...inputStyle, opacity: 0.6, marginBottom: 0 }} />
+                        </div>
+                        <div>
+                            <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Appearance</label>
+                            <input value={roleConfig.appearance} disabled style={{ ...inputStyle, opacity: 0.6, marginBottom: 0 }} />
+                        </div>
+                    </div>
+
+                    {generatorMode === 'LOAD' && (
+                        <div style={{ marginTop: '15px', padding: '15px', background: 'rgba(0, 255, 0, 0.05)', borderRadius: '8px', border: '1px solid var(--accent-green)' }}>
+                            <div style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>Step 2: Load Interaction (Mandatory for Load)</div>
                             <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '5px' }}>
                                 Load the base <span style={{ color: 'var(--accent-blue)' }}>{npcId}_interactions.json</span> file.
                             </p>
@@ -609,12 +753,10 @@ export default function InteractionGenerator() {
                                 />
                             </label>
                         </div>
-                    </div>
-                )}
+                    )}
 
-                {interactionLoaded && (
                     <div style={{ marginTop: '15px', padding: '15px', background: 'rgba(0, 150, 255, 0.05)', borderRadius: '8px', border: '1px solid var(--accent-blue)' }}>
-                        <div style={{ color: 'var(--accent-blue)', fontWeight: 'bold' }}>Step 3: Load Quest or Shop (Optional)</div>
+                        <div style={{ color: 'var(--accent-blue)', fontWeight: 'bold' }}>Optional: Load Quest or Shop Data</div>
                         <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '5px' }}>
                             Import an existing <span style={{ color: 'var(--accent-blue)' }}>quest.json</span> or <span style={{ color: 'var(--accent-blue)' }}>shop.json</span>.
                         </p>
@@ -628,8 +770,8 @@ export default function InteractionGenerator() {
                             />
                         </label>
                     </div>
-                )}
-            </div>
+                </div>
+            )}
 
             {fileLoaded && (
                 <>
@@ -641,9 +783,8 @@ export default function InteractionGenerator() {
                         </p>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
                             {[
-                                { id: 'QUEST', label: 'Quest Giver', icon: '📜', desc: 'Mandatory Dialog + Optional Quest JSON' },
-                                { id: 'SHOP', label: 'Merchant', icon: '💰', desc: 'Mandatory Dialog + Optional Shop JSON' },
-                                { id: 'DIALOG_ONLY', label: 'Dialogue Only', icon: '💬', desc: 'Mandatory Dialog only' }
+                                { id: 'QUEST', label: 'Quest Giver', icon: '📜', desc: 'Dialogue + Quest Configuration' },
+                                { id: 'SHOP', label: 'Merchant', icon: '💰', desc: 'Dialogue + Shop Configuration' }
                             ].map(opt => (
                                 <div
                                     key={opt.id}
@@ -698,7 +839,7 @@ export default function InteractionGenerator() {
                                 <textarea
                                     value={dialogue.text}
                                     onChange={e => setDialogue({ ...dialogue, text: e.target.value })}
-                                    style={{ ...inputStyle, minHeight: '80px' }}
+                                    style={{ ...inputStyle, minHeight: '80px', padding: '12px 14px', lineHeight: '1.5' }}
                                 />
                             </div>
                             <div>
@@ -706,401 +847,399 @@ export default function InteractionGenerator() {
                                 <textarea
                                     value={dialogue.completedText}
                                     onChange={e => setDialogue({ ...dialogue, completedText: e.target.value })}
-                                    style={{ ...inputStyle, minHeight: '60px' }}
+                                    style={{ ...inputStyle, minHeight: '60px', padding: '12px 14px', lineHeight: '1.5' }}
                                     placeholder="Text to show when the player has finished the quest..."
                                 />
                             </div>
 
                             <div>
                                 <label>Player Options</label>
-                                {dialogue.options.map((opt, idx) => (
-                                    <div key={idx} style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
-                                        <input
-                                            placeholder="Button Text"
-                                            value={opt.text}
-                                            onChange={e => updateOption(idx, 'text', e.target.value)}
-                                            style={{ ...inputStyle, flex: 2 }}
-                                        />
-                                        <select
-                                            value={opt.actionType}
-                                            onChange={e => updateOption(idx, 'actionType', e.target.value)}
-                                            style={{ ...inputStyle, flex: 1 }}
-                                        >
-                                            <option value="NONE">Close Dialog</option>
-
-                                            {interactionType === 'QUEST' && (
-                                                <>
-                                                    <option value="QUEST">Accept Quest</option>
-                                                    <option value="CHECK_QUEST">Check Quest Progress</option>
-                                                    <option value="HIDE_IF_COMPLETED">Hide if Completed</option>
-                                                    <option value="SHOW_IF_COMPLETED">Show if Completed</option>
-                                                </>
-                                            )}
-
-                                            {interactionType === 'SHOP' && (
-                                                <option value="SHOP">Open Shop</option>
-                                            )}
-                                        </select>
-                                        <button onClick={async () => {
-                                            if (await showConfirm('Are you sure you want to remove this option?', 'Remove Option', { isDestructive: true, confirmText: 'Remove' })) {
-                                                const newOptions = dialogue.options.filter((_, i) => i !== idx);
-                                                setDialogue({ ...dialogue, options: newOptions });
-                                            }
-                                        }} style={{ ...btnSmallStyle, background: 'var(--accent-red)', height: '42px', marginTop: '5px' }}>×</button>
+                                <div style={{ marginBottom: '10px' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 2fr 45px', gap: '10px', marginBottom: '5px', fontSize: '11px', color: '#888', fontWeight: 'bold' }}>
+                                        <div>BUTTON TEXT</div>
+                                        <div>ACTION TYPE</div>
+                                        <div>TARGET ACTION</div>
+                                        <div></div>
                                     </div>
-                                ))}
+                                    {dialogue.options.map((opt, idx) => (
+                                        <div key={idx} style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 1.5fr) minmax(130px, 1fr) minmax(200px, 2fr) minmax(150px, 1.5fr) 45px', gap: '10px', marginBottom: '10px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                <small style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Button Text</small>
+                                                <input
+                                                    placeholder="e.g. Talk to him"
+                                                    value={opt.text}
+                                                    onChange={e => updateOption(idx, 'text', e.target.value)}
+                                                    style={inputStyle}
+                                                />
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                <small style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Action Type</small>
+                                                <select
+                                                    value={opt.actionType}
+                                                    onChange={e => updateOption(idx, 'actionType', e.target.value)}
+                                                    style={inputStyle}
+                                                >
+                                                    <option value="NONE">close (Exit)</option>
+                                                    <option value="DIALOG">DIALOG</option>
+                                                    <option value="QUEST">ACCEPT_QUEST</option>
+                                                    <option value="CHECK_QUEST">CHECK_QUEST</option>
+                                                    <option value="SHOP">OPEN_SHOP</option>
+                                                    <option value="HIDE_IF_COMPLETED">HIDE_IF_COMPLETED</option>
+                                                    <option value="SHOW_IF_COMPLETED">SHOW_IF_COMPLETED</option>
+                                                </select>
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                <small style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Target Action (Manual ID)</small>
+                                                <div style={{ height: '42px' }}>
+                                                    <input
+                                                        placeholder="e.g. OPEN_SHOP:myshop"
+                                                        value={opt.action || ''}
+                                                        onChange={e => updateOption(idx, 'action', sanitizeItemId(e.target.value))}
+                                                        style={inputStyle}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                <small style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Show Only If Completed</small>
+                                                <input
+                                                    placeholder="Quest ID to gate this option"
+                                                    value={opt.requiredQuestId || ''}
+                                                    onChange={e => updateOption(idx, 'requiredQuestId', sanitizeItemId(e.target.value))}
+                                                    style={inputStyle}
+                                                />
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'flex-end', height: '100%' }}>
+                                                <button onClick={async () => {
+                                                    if (await showConfirm('Are you sure you want to remove this option?', 'Remove Option', { isDestructive: true, confirmText: 'Remove' })) {
+                                                        const newOptions = dialogue.options.filter((_, i) => i !== idx);
+                                                        setDialogue({ ...dialogue, options: newOptions });
+                                                    }
+                                                }} style={{ ...deleteBtnStyle, marginTop: '22px' }}>×</button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                                 <button onClick={addOption} className="btn-secondary" style={btnSmallStyle}>+ Add Option</button>
                             </div>
                         </div>
                     </div>
 
-                    {/* Step 4: Role Configuration */}
-                    <div style={{ marginBottom: '30px' }}>
-                        <h3>Step 4: NPC Configuration</h3>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
-                            <div>
-                                <label>NameTranslationKey (Display Name)</label>
-                                <input
-                                    type="text"
-                                    value={roleConfig.displayName}
-                                    onChange={e => setRoleConfig({ ...roleConfig, displayName: e.target.value })}
-                                    style={inputStyle}
-                                    placeholder="e.g. Master Blacksmith"
-                                />
-                            </div>
-                            <div>
-                                <label>Appearance (Model ID)</label>
-                                <input
-                                    type="text"
-                                    value={roleConfig.appearance}
-                                    onChange={e => setRoleConfig({ ...roleConfig, appearance: e.target.value })}
-                                    style={inputStyle}
-                                    placeholder="e.g. Human"
-                                />
-                                <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: '-5px', fontSize: '10px' }}>Internal model ID (e.g. Human, Undead)</small>
-                            </div>
-                            <div>
-                                <label>Greet Animation</label>
-                                <input
-                                    type="text"
-                                    value={roleConfig.greetAnimation}
-                                    onChange={e => setRoleConfig({ ...roleConfig, greetAnimation: e.target.value })}
-                                    style={inputStyle}
-                                    placeholder="e.g. Wave"
-                                />
-                            </div>
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px', marginTop: '10px' }}>
-                            <div>
-                                <label>Greet Range</label>
-                                <input
-                                    type="number"
-                                    value={roleConfig.greetRange}
-                                    onChange={e => setRoleConfig({ ...roleConfig, greetRange: parseInt(e.target.value) || 0 })}
-                                    style={inputStyle}
-                                />
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '25px' }}>
-                                <input
-                                    type="checkbox"
-                                    id="isStatic"
-                                    checked={roleConfig.isStatic}
-                                    onChange={e => setRoleConfig({ ...roleConfig, isStatic: e.target.checked })}
-                                />
-                                <label htmlFor="isStatic" style={{ cursor: 'pointer', marginBottom: 0 }}>Motion Static</label>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '25px' }}>
-                                <input
-                                    type="checkbox"
-                                    id="motionWander"
-                                    checked={roleConfig.motionWander}
-                                    onChange={e => setRoleConfig({ ...roleConfig, motionWander: e.target.checked })}
-                                />
-                                <label htmlFor="motionWander" style={{ cursor: 'pointer', marginBottom: 0 }}>Motion Wander</label>
-                            </div>
-                        </div>
-                        <small style={{ color: 'var(--text-muted)' }}>Configure basic NPC behavior and look.</small>
-                    </div>
 
                     {/* Conditional Editors */}
-                    {interactionType === 'QUEST' && quest && (
-                        <div style={{ marginBottom: '30px', padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', border: '1px solid var(--accent-yellow)' }}>
-                            <h3 style={{ marginTop: 0, color: 'var(--accent-yellow)' }}>Quest Configuration</h3>
-                            <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Quest ID will be: {npcId.toLowerCase()}_quest</p>
+                    {
+                        interactionType === 'QUEST' && quest && (
+                            <div style={{ marginBottom: '30px', padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', border: '1px solid var(--accent-yellow)' }}>
+                                <h3 style={{ marginTop: 0, color: 'var(--accent-yellow)' }}>Quest Configuration</h3>
+                                <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Quest ID will be: {npcId.toLowerCase()}_quest</p>
 
-                            <label>Quest Title</label>
-                            <input
-                                value={quest.title}
-                                onChange={e => setQuest({ ...quest, title: e.target.value })}
-                                style={inputStyle}
-                            />
-
-                            <label>Description</label>
-                            <textarea
-                                value={quest.description}
-                                onChange={e => setQuest({ ...quest, description: e.target.value })}
-                                style={{ ...inputStyle, minHeight: '60px' }}
-                            />
-
-                            <label>Completion Message (Reward Popup)</label>
-                            <textarea
-                                value={quest.completionMessage}
-                                onChange={e => setQuest({ ...quest, completionMessage: e.target.value })}
-                                style={{ ...inputStyle, minHeight: '50px' }}
-                            />
-
-                            {/* Objectives Editor */}
-                            <div style={{ marginTop: '15px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                                    <label style={{ margin: 0 }}>Quest Objectives</label>
-                                    <button onClick={() => setQuest({
-                                        ...quest,
-                                        objectives: [...quest.objectives, { type: 'COLLECT', target: '', amount: 1 }]
-                                    })} style={{ ...btnSmallStyle, background: 'var(--accent-blue)' }}>+ Add Objective</button>
-                                </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 0.8fr auto', gap: '10px', marginBottom: '5px', fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold' }}>
-                                    <div>TYPE</div>
-                                    <div>TARGET (ID)</div>
-                                    <div>AMOUNT</div>
-                                    <div></div>
-                                </div>
-                                {quest.objectives.map((obj, i) => (
-                                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 0.8fr auto', gap: '10px', marginBottom: '8px', alignItems: 'center' }}>
-                                        <select
-                                            value={obj.type}
-                                            onChange={e => {
-                                                const newObjs = [...quest.objectives];
-                                                newObjs[i].type = e.target.value;
-                                                setQuest({ ...quest, objectives: newObjs });
-                                            }}
-                                            style={{ ...inputStyle, flex: 1 }}
-                                        >
-                                            <option value="COLLECT">Collect</option>
-                                            <option value="KILL">Kill</option>
-                                        </select>
-                                        <ItemSearchInput
-                                            placeholder="Target ID (e.g. Iron_Bar)"
-                                            value={obj.target}
-                                            availableItems={availableItems}
-                                            inputStyle={inputStyle}
-                                            onChange={val => {
-                                                const newObjs = [...quest.objectives];
-                                                newObjs[i].target = val;
-                                                setQuest({ ...quest, objectives: newObjs });
-                                            }}
-                                        />
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '15px' }}>
+                                    <div>
+                                        <label>Quest Title</label>
                                         <input
-                                            type="number"
-                                            placeholder="Amount"
-                                            value={obj.amount}
-                                            onChange={e => {
-                                                const newObjs = [...quest.objectives];
-                                                newObjs[i].amount = parseInt(e.target.value) || 1;
-                                                setQuest({ ...quest, objectives: newObjs });
-                                            }}
-                                            style={{ ...inputStyle, flex: 1 }}
+                                            value={quest.title}
+                                            onChange={e => setQuest({ ...quest, title: e.target.value })}
+                                            style={inputStyle}
+                                            placeholder="e.g. A New Hero"
                                         />
-                                        <button onClick={async () => {
-                                            if (await showConfirm('Remove this objective?', 'Remove Objective', { isDestructive: true, confirmText: 'Remove' })) {
-                                                const newObjs = quest.objectives.filter((_, idx) => idx !== i);
-                                                setQuest({ ...quest, objectives: newObjs });
-                                            }
-                                        }} style={{ ...btnSmallStyle, background: 'var(--accent-red)', height: '100%' }}>×</button>
                                     </div>
-                                ))}
-                            </div>
+                                    <div>
+                                        <label>Prerequisite Quest (Chain)</label>
+                                        <input
+                                            value={quest.requiredQuestId}
+                                            onChange={e => setQuest({ ...quest, requiredQuestId: sanitizeItemId(e.target.value) })}
+                                            style={inputStyle}
+                                            placeholder="e.g. guide_npc_quest"
+                                        />
+                                        <small style={{ color: 'var(--text-muted)' }}>Quest that must be completed before this one can be accepted.</small>
+                                    </div>
+                                </div>
+                                <label>Description</label>
+                                <textarea
+                                    value={quest.description}
+                                    onChange={e => setQuest({ ...quest, description: e.target.value })}
+                                    style={{ ...inputStyle, minHeight: '60px', padding: '12px 14px', lineHeight: '1.5' }}
+                                />
 
-                            {/* Rewards Editor */}
-                            <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                                    <label style={{ margin: 0 }}>Quest Rewards</label>
-                                    <button onClick={() => setQuest({
-                                        ...quest,
-                                        rewards: [...quest.rewards, { type: 'MONEY', amount: 100 }]
-                                    })} style={{ ...btnSmallStyle, background: 'var(--accent-green)' }}>+ Add Reward</button>
+                                {/* Objectives Editor */}
+                                <div style={{ marginTop: '15px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                        <label style={{ margin: 0 }}>Quest Objectives</label>
+                                        <button onClick={() => setQuest({
+                                            ...quest,
+                                            objectives: [...quest.objectives, { type: 'COLLECT', target: '', amount: 1 }]
+                                        })} style={{ ...btnSmallStyle, background: 'var(--accent-blue)' }}>+ Add Objective</button>
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 1fr) 2fr 0.8fr 45px', gap: '10px', marginBottom: '5px', fontSize: '11px', color: '#888', fontWeight: 'bold' }}>
+                                        <div>TYPE</div>
+                                        <div>TARGET (ID)</div>
+                                        <div>AMOUNT</div>
+                                        <div></div>
+                                    </div>
+                                    {quest.objectives.map((obj, i) => (
+                                        <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 1fr) 2fr 0.8fr 45px', gap: '10px', marginBottom: '8px' }}>
+                                            <select
+                                                value={obj.type}
+                                                onChange={e => {
+                                                    const newObjs = [...quest.objectives];
+                                                    newObjs[i].type = e.target.value;
+                                                    setQuest({ ...quest, objectives: newObjs });
+                                                }}
+                                                style={{ ...inputStyle, marginBottom: 0 }}
+                                            >
+                                                <option value="COLLECT">Collect</option>
+                                                <option value="KILL">Kill</option>
+                                            </select>
+                                            <div style={{ width: '100%', height: '42px' }}>
+                                                <ItemSearchInput
+                                                    placeholder="Target ID (e.g. Iron_Bar)"
+                                                    value={obj.target}
+                                                    availableItems={availableItems}
+                                                    inputStyle={inputStyle}
+                                                    onChange={val => {
+                                                        const newObjs = [...quest.objectives];
+                                                        newObjs[i].target = val;
+                                                        setQuest({ ...quest, objectives: newObjs });
+                                                    }}
+                                                />
+                                            </div>
+                                            <input
+                                                type="number"
+                                                placeholder="Amount"
+                                                value={obj.amount}
+                                                onChange={e => {
+                                                    const newObjs = [...quest.objectives];
+                                                    newObjs[i].amount = parseInt(e.target.value) || 1;
+                                                    setQuest({ ...quest, objectives: newObjs });
+                                                }}
+                                                style={{ ...inputStyle, marginBottom: 0 }}
+                                            />
+                                            <button onClick={async () => {
+                                                if (await showConfirm('Remove this objective?', 'Remove Objective', { isDestructive: true, confirmText: 'Remove' })) {
+                                                    const newObjs = quest.objectives.filter((_, idx) => idx !== i);
+                                                    setQuest({ ...quest, objectives: newObjs });
+                                                }
+                                            }} style={deleteBtnStyle}>×</button>
+                                        </div>
+                                    ))}
                                 </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 0.8fr auto', gap: '10px', marginBottom: '5px', fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold' }}>
-                                    <div>TYPE</div>
-                                    <div>REWARD</div>
-                                    <div>AMOUNT</div>
-                                    <div></div>
-                                </div>
-                                {quest.rewards.map((rew, i) => (
-                                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 0.8fr auto', gap: '10px', marginBottom: '8px', alignItems: 'center' }}>
-                                        <select
-                                            value={rew.type}
-                                            onChange={e => {
-                                                const newRews = [...quest.rewards];
-                                                newRews[i].type = e.target.value;
-                                                setQuest({ ...quest, rewards: newRews });
-                                            }}
-                                            style={{ ...inputStyle, flex: 1 }}
-                                        >
-                                            <option value="MONEY">Money</option>
-                                            <option value="ITEM">Item</option>
-                                        </select>
-                                        {rew.type === 'ITEM' && (
-                                            <ItemSearchInput
-                                                placeholder="Item ID"
-                                                value={rew.id || ''}
-                                                availableItems={availableItems}
-                                                inputStyle={inputStyle}
-                                                onChange={val => {
+
+                                {/* Rewards Editor */}
+                                <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                        <label style={{ margin: 0 }}>Quest Rewards</label>
+                                        <button onClick={() => setQuest({
+                                            ...quest,
+                                            rewards: [...quest.rewards, { type: 'MONEY', amount: 100 }]
+                                        })} style={{ ...btnSmallStyle, background: 'var(--accent-green)' }}>+ Add Reward</button>
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 1fr) 2fr 0.8fr 45px', gap: '10px', marginBottom: '5px', fontSize: '11px', color: '#888', fontWeight: 'bold' }}>
+                                        <div>TYPE</div>
+                                        <div>REWARD</div>
+                                        <div>AMOUNT</div>
+                                        <div></div>
+                                    </div>
+                                    {quest.rewards.map((rew, i) => (
+                                        <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 1fr) 2fr 0.8fr 45px', gap: '10px', marginBottom: '8px', alignItems: 'flex-start' }}>
+                                            <select
+                                                value={rew.type}
+                                                onChange={e => {
                                                     const newRews = [...quest.rewards];
-                                                    newRews[i].id = val;
+                                                    newRews[i].type = e.target.value;
+                                                    if (e.target.value === 'ITEM') newRews[i].id = '';
                                                     setQuest({ ...quest, rewards: newRews });
                                                 }}
+                                                style={{ ...inputStyle, marginBottom: 0 }}
+                                            >
+                                                <option value="MONEY">Money</option>
+                                                <option value="ITEM">Item</option>
+                                            </select>
+                                            {rew.type === 'ITEM' ? (
+                                                <div style={{ width: '100%', height: '42px' }}>
+                                                    <ItemSearchInput
+                                                        placeholder="Item ID"
+                                                        value={rew.id}
+                                                        availableItems={availableItems}
+                                                        inputStyle={inputStyle}
+                                                        onChange={val => {
+                                                            const newRews = [...quest.rewards];
+                                                            newRews[i].id = val;
+                                                            setQuest({ ...quest, rewards: newRews });
+                                                        }}
+                                                    />
+                                                </div>
+                                            ) : (
+                                                <div style={{ ...inputStyle, background: 'transparent', border: '1px dashed #333', display: 'flex', alignItems: 'center', color: '#555', marginBottom: 0 }}>
+                                                    N/A (Money only)
+                                                </div>
+                                            )}
+                                            <input
+                                                type="number"
+                                                placeholder="100"
+                                                value={rew.amount}
+                                                onChange={e => {
+                                                    const newRews = [...quest.rewards];
+                                                    newRews[i].amount = parseInt(e.target.value) || 0;
+                                                    setQuest({ ...quest, rewards: newRews });
+                                                }}
+                                                style={{ ...inputStyle, marginBottom: 0 }}
                                             />
-                                        )}
+                                            <button onClick={async () => {
+                                                if (await showConfirm('Remove this reward?', 'Remove Reward', { isDestructive: true, confirmText: 'Remove' })) {
+                                                    const newRews = quest.rewards.filter((_, idx) => idx !== i);
+                                                    setQuest({ ...quest, rewards: newRews });
+                                                }
+                                            }} style={deleteBtnStyle}>×</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )
+                    }
+
+                    {
+                        interactionType === 'SHOP' && shop && (
+                            <div style={{ marginBottom: '30px', padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', border: '1px solid var(--accent-blue)' }}>
+                                <h3 style={{ marginTop: 0, color: 'var(--accent-blue)' }}>Shop Configuration</h3>
+                                <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Shop ID will be: {npcId.toLowerCase()}_shop</p>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                                    <div>
+                                        <label>Shop Title</label>
                                         <input
-                                            type="number"
-                                            placeholder="Amount"
-                                            value={rew.amount}
-                                            onChange={e => {
-                                                const newRews = [...quest.rewards];
-                                                newRews[i].amount = parseInt(e.target.value) || 1;
-                                                setQuest({ ...quest, rewards: newRews });
-                                            }}
-                                            style={{ ...inputStyle, flex: 1 }}
+                                            value={shop.title}
+                                            onChange={e => setShop({ ...shop, title: e.target.value })}
+                                            style={inputStyle}
                                         />
-                                        <button onClick={async () => {
-                                            if (await showConfirm('Remove this reward?', 'Remove Reward', { isDestructive: true, confirmText: 'Remove' })) {
-                                                const newRews = quest.rewards.filter((_, idx) => idx !== i);
-                                                setQuest({ ...quest, rewards: newRews });
-                                            }
-                                        }} style={{ ...btnSmallStyle, background: 'var(--accent-red)', height: '100%' }}>×</button>
                                     </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {interactionType === 'SHOP' && shop && (
-                        <div style={{ marginBottom: '30px', padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', border: '1px solid var(--accent-blue)' }}>
-                            <h3 style={{ marginTop: 0, color: 'var(--accent-blue)' }}>Shop Configuration</h3>
-                            <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Shop ID will be: {npcId.toLowerCase()}_shop</p>
-
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                                <div>
-                                    <label>Shop Title</label>
-                                    <input
-                                        value={shop.title}
-                                        onChange={e => setShop({ ...shop, title: e.target.value })}
-                                        style={inputStyle}
-                                    />
-                                </div>
-                                <div>
-                                    <label>Shop Type</label>
-                                    <select
-                                        value={shop.type}
-                                        onChange={e => setShop({ ...shop, type: e.target.value })}
-                                        style={inputStyle}
-                                    >
-                                        <option value="buy">Player Buys (Merchant)</option>
-                                        <option value="sell">Player Sells (Buyer)</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div style={{ marginTop: '15px' }}>
-                                <label>Shop Inventory</label>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.5fr 0.5fr 1fr auto', gap: '8px', marginBottom: '5px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                                    <div>Item ID</div>
-                                    <div>Display Name</div>
-                                    <div>Qty</div>
-                                    <div>Price (Gold)</div>
-                                    <div></div>
-                                </div>
-                                {shop.items.map((item, i) => (
-                                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.5fr 0.5fr 1fr auto', gap: '8px', marginBottom: '8px' }}>
-                                        <ItemSearchInput
-                                            placeholder="ID (e.g. Weapon_Sword)"
-                                            value={item.id}
-                                            availableItems={availableItems}
-                                            inputStyle={inputStyle}
-                                            onChange={val => {
-                                                const newItems = [...shop.items];
-                                                newItems[i].id = val;
-                                                setShop({ ...shop, items: newItems });
-                                            }}
-                                        />
-                                        <input
-                                            placeholder="Name (e.g. Iron Sword)"
-                                            value={item.name || ''}
-                                            onChange={e => {
-                                                const newItems = [...shop.items];
-                                                newItems[i].name = e.target.value;
-                                                setShop({ ...shop, items: newItems });
-                                            }}
+                                    <div>
+                                        <label>Shop Type</label>
+                                        <select
+                                            value={shop.type}
+                                            onChange={e => setShop({ ...shop, type: e.target.value })}
                                             style={inputStyle}
-                                        />
-                                        <input
-                                            type="number"
-                                            placeholder="1"
-                                            value={item.amount}
-                                            onChange={e => {
-                                                const newItems = [...shop.items];
-                                                newItems[i].amount = parseInt(e.target.value) || 1;
-                                                setShop({ ...shop, items: newItems });
-                                            }}
-                                            style={inputStyle}
-                                        />
-                                        <input
-                                            type="number"
-                                            placeholder="Price"
-                                            value={shop.type === 'buy' ? item.buyPrice : item.sellPrice}
-                                            onChange={e => {
-                                                const newItems = [...shop.items];
-                                                const val = parseInt(e.target.value) || 0;
-                                                if (shop.type === 'buy') newItems[i].buyPrice = val;
-                                                else newItems[i].sellPrice = val;
-                                                setShop({ ...shop, items: newItems });
-                                            }}
-                                            style={inputStyle}
-                                        />
-                                        <button onClick={async () => {
-                                            if (await showConfirm('Remove this item from the shop?', 'Remove Shop Item', { isDestructive: true, confirmText: 'Remove' })) {
-                                                const newItems = shop.items.filter((_, idx) => idx !== i);
-                                                setShop({ ...shop, items: newItems });
-                                            }
-                                        }} style={{ ...btnSmallStyle, background: 'var(--accent-red)', height: '42px' }}>×</button>
+                                        >
+                                            <option value="buy">Player Buys (Merchant)</option>
+                                            <option value="sell">Player Sells (Buyer)</option>
+                                        </select>
                                     </div>
-                                ))}
-                                <button onClick={() => setShop({
-                                    ...shop,
-                                    items: [...shop.items, { id: '', name: '', amount: 1, buyPrice: 10, sellPrice: 5 }]
-                                })} style={btnSmallStyle}>+ Add Item</button>
-                            </div>
+                                </div>
 
-                        </div>
-                    )}
+                                <div style={{ marginTop: '15px' }}>
+                                    <label>Shop Inventory</label>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 0.5fr 1fr 45px', gap: '8px', marginBottom: '5px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                                        <div>Item ID</div>
+                                        <div>Qty</div>
+                                        <div>Price (Gold)</div>
+                                        <div></div>
+                                    </div>
+                                    {shop.items.map((item, i) => (
+                                        <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 0.5fr 1fr 45px', gap: '8px', marginBottom: '8px' }}>
+                                            <div style={{ width: '100%', height: '42px' }}>
+                                                <ItemSearchInput
+                                                    placeholder="ID (e.g. Weapon_Sword)"
+                                                    value={item.id}
+                                                    availableItems={availableItems}
+                                                    inputStyle={inputStyle}
+                                                    onChange={val => {
+                                                        const newItems = [...shop.items];
+                                                        newItems[i].id = val;
+                                                        setShop({ ...shop, items: newItems });
+                                                    }}
+                                                />
+                                            </div>
+                                            <input
+                                                type="number"
+                                                placeholder="1"
+                                                value={item.amount}
+                                                onChange={e => {
+                                                    const newItems = [...shop.items];
+                                                    newItems[i].amount = parseInt(e.target.value) || 1;
+                                                    setShop({ ...shop, items: newItems });
+                                                }}
+                                                style={{ ...inputStyle, marginBottom: 0 }}
+                                            />
+                                            <input
+                                                type="number"
+                                                placeholder="Price"
+                                                value={shop.type === 'buy' ? item.buyPrice : item.sellPrice}
+                                                onChange={e => {
+                                                    const newItems = [...shop.items];
+                                                    const val = parseInt(e.target.value) || 0;
+                                                    if (shop.type === 'buy') newItems[i].buyPrice = val;
+                                                    else newItems[i].sellPrice = val;
+                                                    setShop({ ...shop, items: newItems });
+                                                }}
+                                                style={{ ...inputStyle, marginBottom: 0 }}
+                                            />
+                                            <button onClick={async () => {
+                                                if (await showConfirm('Remove this item from the shop?', 'Remove Shop Item', { isDestructive: true, confirmText: 'Remove' })) {
+                                                    const newItems = shop.items.filter((_, idx) => idx !== i);
+                                                    setShop({ ...shop, items: newItems });
+                                                }
+                                            }} style={deleteBtnStyle}>×</button>
+                                        </div>
+                                    ))}
+                                    <button onClick={() => setShop({
+                                        ...shop,
+                                        items: [...shop.items, { id: '', amount: 1, buyPrice: 10, sellPrice: 5 }]
+                                    })} style={btnSmallStyle}>+ Add Item</button>
+                                </div>
+
+                            </div>
+                        )
+                    }
 
                     <button onClick={generateZip} className="btn-primary" style={{ width: '100%', padding: '15px' }}>
                         Generate Interaction Pack
                     </button>
                 </>
-            )}
-        </div>
+            )
+            }
+        </div >
     );
 }
 
 const inputStyle = {
     width: '100%',
-    padding: '10px',
-    background: 'rgba(0,0,0,0.2)',
-    border: '1px solid var(--border-color)',
-    borderRadius: '5px',
-    color: 'white',
-    marginTop: '5px',
-    marginBottom: '10px'
+    height: '42px',
+    padding: '0 14px',
+    background: '#1a1a1a',
+    border: '1px solid #333',
+    borderRadius: '8px',
+    color: '#e0e0e0',
+    fontSize: '14px',
+    transition: 'all 0.2s ease',
+    outline: 'none',
+    marginTop: '4px',
+    marginBottom: '0', // Removed margin for better grid control
+    boxSizing: 'border-box'
 };
 
 const btnSmallStyle = {
-    padding: '5px 10px',
-    fontSize: '12px',
-    background: 'var(--bg-primary)',
-    border: '1px solid var(--border-color)',
-    color: 'white',
+    height: '32px',
+    padding: '0 16px',
+    fontSize: '13px',
+    fontWeight: '500',
+    background: '#2a2a2a',
+    border: '1px solid #444',
+    color: '#fff',
     cursor: 'pointer',
-    borderRadius: '4px'
+    borderRadius: '6px',
+    transition: 'all 0.2s ease',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px'
+};
+
+const deleteBtnStyle = {
+    ...btnSmallStyle,
+    background: 'rgba(255, 68, 68, 0.1)',
+    border: '1px solid rgba(255, 68, 68, 0.3)',
+    color: '#ff4444',
+    width: '42px', // Match input height
+    height: '42px', // Match input height
+    padding: '0',
+    fontSize: '18px',
+    marginTop: '4px'
 };
